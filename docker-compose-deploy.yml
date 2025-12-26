@@ -1,0 +1,17 @@
+version: '3.8'
+
+services:
+  vinylbuddy:
+    image: potseeslc/vinylbuddy:latest
+    ports:
+      - "3000:3000"
+    volumes:
+      - vinyl-uploads:/app/uploads
+    environment:
+      - MUSICBRAINZ_CONTACT=your-email@example.com
+      # - ACOUSTID_API_KEY=your-acoustid-api-key  # Uncomment and set if you have an API key
+      - NODE_ENV=production
+    restart: unless-stopped
+
+volumes:
+  vinyl-uploads:
