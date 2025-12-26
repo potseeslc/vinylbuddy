@@ -1,31 +1,27 @@
 version: '3.8'
 
 services:
-  caddy:
-    image: caddy:2
+  vinylbuddy:
+    image: potseeslc/vinylbuddy:latest
+    container_name: vinylbuddy
     ports:
-      - "8081:80"
+      - "3000:3000"
     volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile:ro
-      - caddy_data:/data
-    depends_on:
-      - api
-      - web
-
-  api:
-    build: ./api
+      - vinylbuddy_uploads:/app/uploads
     environment:
-      - NODE_ENV=production
-      - MAX_UPLOAD_MB=25
-    expose:
-      - "3000"
-    volumes:
-      - ./api/uploads:/app/uploads
-
-  web:
-    build: ./web
-    expose:
-      - "5173"
+      - MUSICBRAINZ_CONTACT=your-email@example.com
+      # - ACOUSTID_API_KEY=your-acoustid-api-key  # Uncomment and set if you have an API key
+      # - MAX_UPLOAD_MB=25  # Optional: Set maximum upload size in MB
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    labels:
+      - "com.centurylinklabs.watchtower.enable=true"  # For auto-updates if using Watchtower
 
 volumes:
-  caddy_data:
+  vinylbuddy_uploads:
+    driver: local
