@@ -6,6 +6,9 @@ services:
     ports:
       - "3000:3000"
     volumes:
-      - ./uploads:/app/uploads
+      - vinyl-uploads:/app/uploads
     environment:
       - NODE_ENV=production
+
+volumes:
+  vinyl-uploads:

@@ -1,148 +1,127 @@
 # Vinyl Buddy
 
-A self-hosted web application that identifies vinyl records using your device's microphone and displays album information including cover art and tracklist.
+Vinyl Buddy is a self-hosted web application that helps you identify vinyl records by listening to a snippet of the music and matching it against music databases. Simply point your phone's microphone at your turntable, record a short clip, and let Vinyl Buddy identify the album and track for you.
 
 ## Features
 
-- Records audio samples from your device's microphone
-- Identifies full albums using AcoustID and MusicBrainz
-- Displays album cover art from Cover Art Archive
-- Shows complete tracklist with track numbers and durations
-- Self-hosted with Docker for easy deployment
-- Protected by Cloudflare Access for secure internet access
+- **Audio Recognition**: Records audio snippets and identifies tracks using multiple music recognition services
+- **Shazam Integration**: Uses Shazam for accurate music recognition
+- **AcoustID/MusicBrainz Integration**: Alternative recognition method using fingerprinting technology
+- **Metadata Search**: Search by artist, album, or track name when audio recognition isn't sufficient
+- **Cover Art Display**: Shows album artwork when available
+- **Self-Hosted**: Run the application on your own hardware for complete privacy
+- **Docker Support**: Easy deployment using Docker containers
 
 ## Prerequisites
 
-- Docker and Docker Compose
-- A Cloudflare account (for secure internet access)
-- An AcoustID API key (free)
-- A MusicBrainz contact URL or email
+- Docker and Docker Compose installed on your system
+- Microphone access (built-in or external)
 
-## Setup
+## Quick Start with Docker Compose
 
-1. Clone this repository:
-   ```bash
-   git clone <repository-url>
-   cd vinyl-now-playing
-   ```
+1. Create a `docker-compose.yml` file:
 
-2. Build and start the services:
-   ```bash
-   docker-compose up --build
-   ```
+```yaml
+version: '3.8'
 
-3. Access the application at `http://localhost:8081`
+services:
+  vinylbuddy:
+    image: potseeslc/vinylbuddy:latest
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./uploads:/app/uploads
+```
 
-4. Configure API keys through the web interface:
-   - Click the "API Keys" button
-   - Enter your AcoustID API key and MusicBrainz contact information
-   - Click "Save Configuration"
+2. Start the service:
+```bash
+docker-compose up -d
+```
 
-### Alternative: Environment Variables
-You can also configure the API keys using environment variables:
+3. Access the application in your browser at http://localhost:3000
 
-1. Copy the example environment file:
-   ```bash
-   cp api/.env.example api/.env
-   ```
+## Example Deployment
 
-2. Edit `api/.env` and add your API keys:
-   ```
-   ACOUSTID_API_KEY=your_acoustid_api_key_here
-   MUSICBRAINZ_CONTACT=https://yourwebsite.com
-   ```
+See the `examples/docker-compose.yml` file for an example using named volumes:
 
-3. Rebuild and restart the services:
-   ```bash
-   docker-compose up --build
-   ```
+```yaml
+version: '3.8'
 
-## Cloudflare Tunnel Setup (for internet access)
+services:
+  vinylbuddy:
+    image: potseeslc/vinylbuddy:latest
+    ports:
+      - "3000:3000"
+    volumes:
+      - vinyl-uploads:/app/uploads
+    environment:
+      - NODE_ENV=production
 
-To access your application securely over the internet:
+volumes:
+  vinyl-uploads:
+```
 
-1. Install Cloudflare Tunnel (cloudflared) on your server
-2. Create a tunnel:
-   ```bash
-   cloudflared tunnel create vinyl-now-playing
-   ```
+## Configuration
 
-3. Route the tunnel to your local service:
-   ```bash
-   cloudflared tunnel route dns vinyl-now-playing vinyl.yourdomain.com
-   ```
+The application requires no additional configuration to run, but you can customize:
 
-4. Run the tunnel:
-   ```bash
-   cloudflared tunnel run vinyl-now-playing
-   ```
-
-5. Configure Cloudflare Access in the Zero Trust dashboard to protect your application
-
-## How It Works
-
-1. The web interface requests microphone access and records audio samples
-2. Audio is sent to the backend API for processing
-3. The API converts audio to WAV format using ffmpeg
-4. Chromaprint's fpcalc generates an audio fingerprint
-5. The fingerprint is sent to AcoustID for matching
-6. Matching releases are retrieved from MusicBrainz
-7. Album artwork is fetched from Cover Art Archive
-8. All information is displayed in the web interface
-
-### Architecture Details
-
-The application uses a reverse proxy (Caddy) to route requests:
-- `/api/*` requests are forwarded to the Node.js API service (with the `/api` prefix stripped)
-- All other requests are served by the React frontend
-
-This means API endpoints are defined without the `/api` prefix in the Node.js code, as Caddy handles the routing.
-
-## API Keys
-
-### AcoustID
-1. Go to https://acoustid.org/api-key
-2. Register for an API key (free for non-commercial use)
-3. Add it to your environment variables
-
-### MusicBrainz
-1. No API key required, but you must provide contact information
-2. Add a URL or email to your environment variables
+- **Port**: Change the port mapping in docker-compose.yml
+- **Upload Directory**: Modify the volume mapping to change where audio files are stored
 
 ## Usage
 
-1. Navigate to the web interface
-2. Set your desired sample length (recommended 30 seconds for best results)
-3. Click "Start Listening" and allow microphone access
-4. Place your device near the record player
-5. View the identified album information
+1. Open the Vinyl Buddy web interface in your browser
+2. Click the "Record" button and hold your phone's microphone near your turntable
+3. Play a section of the record (15-30 seconds works best)
+4. Stop recording and wait for the identification results
+5. View the identified album information and cover art
 
-## Troubleshooting
+## Recognition Methods
 
-- If identification fails, try increasing the sample length
-- Ensure your record player is playing music when recording
-- Check that your microphone is working and positioned correctly
-- Verify your API keys are correctly configured
+Vinyl Buddy uses multiple recognition methods:
 
-## Development
+1. **Shazam Recognition**: Primary method using the Shazam API
+2. **AcoustID Fingerprinting**: Alternative method using audio fingerprinting
+3. **Metadata Search**: Manual search by artist/album/track information
 
-### Backend (Node.js)
-- Located in the `api/` directory
-- Uses Fastify for the web server
-- Handles audio processing, fingerprinting, and API calls
+## Technical Details
 
-### Frontend (React)
-- Located in the `web/` directory
-- Uses Vite for development and building
-- Provides the user interface for recording and displaying results
+- **Frontend**: React-based web interface
+- **Backend**: Node.js with Fastify framework
+- **Audio Processing**: FFmpeg for audio conversion
+- **Recognition Services**: 
+  - Shazam for primary identification
+  - AcoustID for fingerprint-based recognition
+  - MusicBrainz for metadata lookup
+  - Cover Art Archive for album artwork
 
-### Adding New Features
-1. Modify the appropriate service (api or web)
-2. Rebuild the Docker containers:
-   ```bash
-   docker-compose up --build
-   ```
+## Docker Images
+
+Pre-built Docker images are available on Docker Hub:
+
+```bash
+# Pull the latest image
+docker pull potseeslc/vinylbuddy:latest
+
+# Run with default settings
+docker run -p 3000:3000 -v ./uploads:/app/uploads potseeslc/vinylbuddy:latest
+```
+
+## Building from Source
+
+If you prefer to build from source:
+
+1. Clone the repository
+2. Navigate to the project directory
+3. Build the Docker image:
+```bash
+docker build -t potseeslc/vinylbuddy:latest .
+```
 
 ## License
 
-This project is open source and available under the MIT License.
+This project is licensed under the MIT License - see the LICENSE file for details.
+
+## Support
+
+For issues, feature requests, or questions, please open an issue on the GitHub repository.
