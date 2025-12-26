@@ -290,14 +290,15 @@ const NowPlaying = ({
             {/* Status/Method badge */}
             {method && (
               <div className="source" style={{
-                fontSize: '12px',
-                fontWeight: '400',
-                letterSpacing: '0.05em',
+                fontSize: '10px',
+                fontWeight: '300',
+                letterSpacing: '0.02em',
                 color: textColor,
-                textShadow: textShadow,
+                textShadow: 'none',
                 textTransform: 'uppercase',
-                opacity: '0.15',
-                marginTop: '20px'
+                opacity: '0.08',
+                marginTop: '25px',
+                textAlign: 'left'
               }}>
                 Identified via {method}
               </div>
