@@ -1,0 +1,17 @@
+:80 {
+    route {
+        # API
+        handle_path /api/* {
+            reverse_proxy api:3000
+        }
+        
+        # Frontend
+        handle {
+            reverse_proxy web:5173
+        }
+    }
+    
+    log {
+        output file /data/access.log
+    }
+}
