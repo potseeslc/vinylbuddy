@@ -1,0 +1,1 @@
+{"name":"vinyl-now-playing-api","private":true,"type":"module","dependencies":{"@fastify/multipart":"^8.2.0","axios":"^1.6.0","fastify":"^4.28.1","node-shazam":"^1.2.7","uuid":"^9.0.0"}}
