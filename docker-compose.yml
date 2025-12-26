@@ -1,11 +1,31 @@
 version: '3.8'
 
 services:
-  vinylbuddy:
-    image: potseeslc/vinylbuddy:latest
+  caddy:
+    image: caddy:2
     ports:
-      - "3000:3000"
+      - "8081:80"
     volumes:
-      - ./uploads:/app/uploads
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+    depends_on:
+      - api
+      - web
+
+  api:
+    build: ./api
     environment:
       - NODE_ENV=production
+      - MAX_UPLOAD_MB=25
+    expose:
+      - "3000"
+    volumes:
+      - ./api/uploads:/app/uploads
+
+  web:
+    build: ./web
+    expose:
+      - "5173"
+
+volumes:
+  caddy_data:
