@@ -31,11 +31,11 @@ cd vinyl-now-playing
 docker-compose up -d
 ```
 
-3. Access the application in your browser at http://localhost:8081
+3. Access the application in your browser at http://localhost:3000
 
 ## Usage
 
-1. Open the Vinyl Buddy web interface in your browser at http://localhost:8081
+1. Open the Vinyl Buddy web interface in your browser at http://localhost:3000
 2. Click the record player icon to start continuous listening mode
 3. The application will automatically request microphone access
 4. Start playing music on your turntable
