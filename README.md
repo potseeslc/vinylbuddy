@@ -147,3 +147,7 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 ## Support
 
 For issues, feature requests, or questions, please open an issue on the GitHub repository.
+
+## Built with Goose
+
+This project was developed with the help of [Goose](https://block.github.io/goose/) by Block, Inc. Goose is an open-source AI agent that helps developers build software more efficiently through intelligent automation and tool integration. The Vinyl Buddy application was created using Goose's capabilities for code generation, debugging, and documentation.
