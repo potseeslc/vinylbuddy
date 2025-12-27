@@ -72,8 +72,9 @@ const ContinuousListening = ({ onResult, onError, onStatusUpdate, autoStart = fa
       updateStatus('Requesting microphone permission...');
       console.log('Requesting microphone permission...');
       
-      // Get microphone access
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      // Explicitly request microphone permission with constraints
+      const constraints = { audio: true, video: false };
+      const stream = await navigator.mediaDevices.getUserMedia(constraints);
       streamRef.current = stream;
       console.log('Microphone access granted');
 
@@ -194,7 +195,7 @@ const ContinuousListening = ({ onResult, onError, onStatusUpdate, autoStart = fa
         } else {
           updateStatus(`No active recording - attempt #${counter}`);
         }
-      }, 15000); // Check every 15 seconds for better audio quality
+      }, 20000); // Check every 20 seconds for better audio quality
 
       setIsListening(true);
       console.log('Listening state set to true');
@@ -534,7 +535,7 @@ const ContinuousListening = ({ onResult, onError, onStatusUpdate, autoStart = fa
           fontSize: '0.9rem'
         }}>
           <p style={{ margin: 0 }}>
-            Continuous listening checks for music every 15 seconds. 
+            Continuous listening checks for music every 20 seconds. 
             The system will automatically detect new songs as they play.
           </p>
         </div>
