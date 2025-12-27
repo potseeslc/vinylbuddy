@@ -17,6 +17,7 @@ Vinyl Buddy is a self-hosted web application that helps you identify vinyl recor
 
 - Docker and Docker Compose installed on your system
 - Microphone access (built-in or external)
+- **Important**: The application must be accessed via `localhost` or HTTPS to enable microphone access due to browser security restrictions
 
 ## Quick Start with Docker Compose
 
@@ -43,6 +44,8 @@ docker-compose up -d
 6. View the identified album information and cover art as each track plays
 7. For privacy protection, the app will automatically return to the initial screen after 5 minutes of inactivity (no music detected)
 8. To resume listening, simply click the record player icon again
+
+**Note**: Due to browser security restrictions, the application must be accessed via `localhost` or HTTPS to enable microphone access. If accessing remotely, you'll need to set up HTTPS with a valid certificate.
 
 ## Technical Details
 
