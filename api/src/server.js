@@ -1,5 +1,6 @@
 import Fastify from "fastify";
 import multipart from "@fastify/multipart";
+import fastifyStatic from "@fastify/static";
 import { v4 as uuidv4 } from "uuid";
 import axios from "axios";
 import { exec } from "child_process";
@@ -10,6 +11,9 @@ import { fileURLToPath } from 'url';
 import { pipeline as streamPipeline } from 'stream';
 // Import Shazam library
 import { Shazam } from 'node-shazam';
+// Import Last.fm service
+import { scrobbleTrack, updateNowPlaying, isLastFmConfigured } from './lastfm-service.js';
+
 const shazam = new Shazam();
 
 const __filename = fileURLToPath(import.meta.url);
@@ -21,6 +25,28 @@ const fastify = Fastify({
   logger: true,
   bodyLimit: (Number(process.env.MAX_UPLOAD_MB || "25")) * 1024 * 1024
 });
+
+// Configuration setup
+const uploadsDir = path.join(__dirname, 'uploads');
+const configPath = path.join(__dirname, '.env');
+
+// Ensure uploads directory exists
+if (!fs.existsSync(uploadsDir)) {
+  fs.mkdirSync(uploadsDir, { recursive: true });
+}
+
+// Load configuration
+let config = {};
+if (fs.existsSync(configPath)) {
+  const configContent = fs.readFileSync(configPath, 'utf8');
+  const lines = configContent.split('\n');
+  for (const line of lines) {
+    const [key, value] = line.split('=');
+    if (key && value) {
+      config[key.trim()] = value.trim();
+    }
+  }
+}
 
 // Register JSON body parser
 fastify.addContentTypeParser('application/json', { parseAs: 'string' }, function (req, body, done) {
@@ -40,49 +66,17 @@ fastify.register(multipart, {
   },
 });
 
-// Ensure uploads directory exists
-const uploadsDir = path.join(__dirname, 'uploads');
-if (!fs.existsSync(uploadsDir)) {
-  fs.mkdirSync(uploadsDir, { recursive: true });
-}
-
-// Configuration file path
-const configPath = path.join(__dirname, '.env');
-
-// Load configuration
-let config = {};
-if (fs.existsSync(configPath)) {
-  const envContent = fs.readFileSync(configPath, 'utf8');
-  const lines = envContent.split('\n');
-  for (const line of lines) {
-    const trimmedLine = line.trim();
-    if (trimmedLine && !trimmedLine.startsWith('#')) {
-      const [key, value] = trimmedLine.split('=');
-      if (key && value !== undefined) {
-        config[key.trim()] = value.trim();
-      }
-    }
-  }
-}
-
-// Override with environment variables if set (only for keys not already in config)
-for (const key in process.env) {
-  if (process.env[key] && !config[key]) {
-    config[key] = process.env[key];
-  }
-}
-
 // Health check endpoint
-fastify.get("/health", async () => ({ ok: true }));
+fastify.get("/api/health", async () => ({ ok: true }));
 
 // Configuration endpoints
-fastify.get("/config", async () => {
+fastify.get("/api/config", async () => {
   return {
     musicbrainz_contact: !!config.MUSICBRAINZ_CONTACT
   };
 });
 
-fastify.post("/config", async (req, reply) => {
+fastify.post("/api/config", async (req, reply) => {
   try {
     const { musicbrainzContact } = req.body;
     
@@ -123,7 +117,7 @@ fastify.post("/config", async (req, reply) => {
 });
 
 // Upload endpoint: expects multipart/form-data field name "audio"
-fastify.post("/identify", async (req, reply) => {
+fastify.post("/api/identify", async (req, reply) => {
   try {
     const part = await req.file();
     if (!part) return reply.code(400).send({ error: "Missing file field 'audio'" });
@@ -398,7 +392,7 @@ fastify.post("/identify", async (req, reply) => {
 });
 
 // New endpoint for metadata-based recognition
-fastify.post("/identify-metadata", async (req, reply) => {
+fastify.post("/api/identify-metadata", async (req, reply) => {
   try {
     const { artist, album, track } = req.body;
     
@@ -635,7 +629,7 @@ fastify.post("/identify-metadata", async (req, reply) => {
 });
 
 // Enhanced identification endpoint that tries both methods
-fastify.post("/identify-hybrid", async (req, reply) => {
+fastify.post("/api/identify-hybrid", async (req, reply) => {
   try {
     // First, try to process uploaded audio file (your existing method)
     let audioResult = null;
@@ -1151,7 +1145,7 @@ fastify.post("/identify-hybrid", async (req, reply) => {
 });
 
 // Fallback route for debugging
-fastify.post("/debug-upload", async (req, reply) => {
+fastify.post("/api/debug-upload", async (req, reply) => {
   const part = await req.file();
   if (!part) return reply.code(400).send({ error: "Missing file field 'audio'" });
 
@@ -1169,7 +1163,9 @@ fastify.post("/debug-upload", async (req, reply) => {
 });
 
 // New endpoint for Shazam recognition
-fastify.post("/identify-shazam", async (req, reply) => {
+fastify.post("/api/identify-shazam", async (req, reply) => {
+  fastify.log.info("Shazam identification endpoint called");
+  
   try {
     const part = await req.file();
     if (!part) return reply.code(400).send({ error: "Missing file field 'audio'" });
@@ -1237,7 +1233,8 @@ fastify.post("/identify-shazam", async (req, reply) => {
             releaseDate = trackInfo.release_date;
           }
           
-          return {
+          // Prepare the result
+          const resultData = {
             success: true,
             method: "shazam",
             recording: {
@@ -1254,6 +1251,33 @@ fastify.post("/identify-shazam", async (req, reply) => {
             coverArtUrl: coverArtUrl,
             shazamData: shazamResult
           };
+          
+          // Scrobble to Last.fm if configured
+          if (isLastFmConfigured) {
+            try {
+              const artistName = trackInfo.subtitle || 'Unknown Artist';
+              const trackTitle = trackInfo.title || 'Unknown Title';
+              const albumTitle = trackInfo.sections?.find(section => section.type === 'SONG')?.metadata?.find(meta => meta.title === 'Album')?.text || trackInfo.title || 'Unknown Album';
+              const duration = trackInfo.duration || 0;
+              
+              fastify.log.info(`Attempting to scrobble track to Last.fm: ${artistName} - ${trackTitle}`);
+              
+              
+              // For scrobbling, we would normally wait until the track has been playing for a while
+              // But for this vinyl detection app, we'll scrobble immediately as a "played" track
+              // In a real scrobbling implementation, you'd track play time and only scrobble 
+              // after 4 minutes or 50% of track length (whichever is shorter)
+              const scrobbleResult = await scrobbleTrack(artistName, trackTitle, albumTitle, duration);
+              fastify.log.info('Scrobble result:', scrobbleResult);
+              
+              fastify.log.info(`Successfully sent track to Last.fm: ${artistName} - ${trackTitle}`);
+            } catch (lastfmError) {
+              fastify.log.warn(`Failed to scrobble to Last.fm: ${lastfmError.message}`);
+            }
+          }
+          
+          // Return the result
+          return resultData;
         }
       }
       
@@ -1290,7 +1314,7 @@ fastify.post("/identify-shazam", async (req, reply) => {
 });
 
 // Enhanced endpoint that uses ONLY Shazam for recognition
-fastify.post("/identify-enhanced", async (req, reply) => {
+fastify.post("/api/identify-enhanced", async (req, reply) => {
   try {
     // Store the uploaded file for Shazam recognition
     const part = await req.file();
@@ -1366,6 +1390,30 @@ fastify.post("/identify-enhanced", async (req, reply) => {
             shazamData: shazamResult
           };
           
+          // Scrobble to Last.fm if configured
+          if (isLastFmConfigured) {
+            try {
+              const artistName = trackInfo.subtitle || 'Unknown Artist';
+              const trackTitle = trackInfo.title || 'Unknown Title';
+              const albumTitle = trackInfo.sections?.find(section => section.type === 'SONG')?.metadata?.find(meta => meta.title === 'Album')?.text || trackInfo.title || 'Unknown Album';
+              const duration = trackInfo.duration || 0;
+              
+              fastify.log.info(`Attempting to scrobble track to Last.fm: ${artistName} - ${trackTitle}`);
+              
+              
+              // For scrobbling, we would normally wait until the track has been playing for a while
+              // But for this vinyl detection app, we'll scrobble immediately as a "played" track
+              // In a real scrobbling implementation, you'd track play time and only scrobble 
+              // after 4 minutes or 50% of track length (whichever is shorter)
+              const scrobbleResult = await scrobbleTrack(artistName, trackTitle, albumTitle, duration);
+              fastify.log.info('Scrobble result:', scrobbleResult);
+              
+              fastify.log.info(`Successfully sent track to Last.fm: ${artistName} - ${trackTitle}`);
+            } catch (lastfmError) {
+              fastify.log.warn(`Failed to scrobble to Last.fm: ${lastfmError.message}`);
+            }
+          }
+          
           fastify.log.info("Shazam recognition successful");
         }
       } else {
@@ -1407,6 +1455,67 @@ fastify.post("/identify-enhanced", async (req, reply) => {
       message: error.message 
     });
   }
+});
+
+// Serve static files (built frontend) AFTER all API routes
+// Use a more specific approach to avoid conflicts with API routes
+fastify.register(fastifyStatic, {
+  root: path.join(__dirname, '..', 'web', 'dist'),
+  prefix: '/',  // Serve all files from the root
+  decorateReply: false,
+  allowedPath: (pathName) => {
+    // Don't serve static files for API routes
+    return !pathName.startsWith('/api/');
+  }
+});
+
+// Serve the main index.html file for the root route
+fastify.get('/', (req, reply) => {
+  const indexPath = path.join(__dirname, '..', 'web', 'dist', 'index.html');
+  fs.readFile(indexPath, 'utf8', (err, data) => {
+    if (err) {
+      reply.code(500).send({ error: 'Failed to load frontend app' });
+      return;
+    }
+    reply.type('text/html').send(data);
+  });
+});
+
+// Serve favicon if it exists
+fastify.get('/favicon.ico', (req, reply) => {
+  const faviconPath = path.join(__dirname, '..', 'web', 'dist', 'favicon.ico');
+  fs.access(faviconPath, fs.constants.F_OK, (err) => {
+    if (err) {
+      reply.code(404).send({ error: 'Not found' });
+    } else {
+      fs.readFile(faviconPath, (err, data) => {
+        if (err) {
+          reply.code(500).send({ error: 'Failed to read favicon' });
+        } else {
+          reply.type('image/x-icon').send(data);
+        }
+      });
+    }
+  });
+});
+
+// Custom 404 handler to properly handle API routes vs SPA routes
+fastify.setNotFoundHandler((req, res) => {
+  // For API routes, return 404
+  if (req.url.startsWith('/api/')) {
+    res.code(404).send({ error: 'Route not found' });
+    return;
+  }
+  
+  // For all other routes, serve the frontend app (SPA fallback)
+  const indexPath = path.join(__dirname, '..', 'web', 'dist', 'index.html');
+  fs.readFile(indexPath, 'utf8', (err, data) => {
+    if (err) {
+      res.code(500).send({ error: 'Failed to load frontend app' });
+      return;
+    }
+    res.type('text/html').send(data);
+  });
 });
 
 const start = async () => {

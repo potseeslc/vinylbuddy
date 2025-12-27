@@ -2,16 +2,20 @@ version: '3.8'
 
 services:
   vinylbuddy:
-    image: potseeslc/vinylbuddy:latest
+    image: potseeslc/vinylbuddy:lastfm-final-fix
     container_name: vinylbuddy
     ports:
       - "3000:3000"
     volumes:
       - vinylbuddy_uploads:/app/uploads
     environment:
-      - MUSICBRAINZ_CONTACT=your-email@example.com
+      - MUSICBRAINZ_CONTACT=colterw@gmail.com
       # - ACOUSTID_API_KEY=your-acoustid-api-key  # Uncomment and set if you have an API key
       # - MAX_UPLOAD_MB=25  # Optional: Set maximum upload size in MB
+      - LASTFM_API_KEY=a02b9bd835fd12de072e24d1d8e16a48  # Uncomment and set for Last.fm scrobbling
+      - LASTFM_SECRET=5f0efc54d8060bdc5902fe5db73b05d9  # Uncomment and set for Last.fm scrobbling
+      - LASTFM_USERNAME=potseeslc  # Uncomment and set for Last.fm scrobbling
+      - LASTFM_SESSION_KEY=6j6UYRBkTnQe55_mvRpx0PTzfdJplIDa  # Uncomment and set for Last.fm scrobbling
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:3000/api/health"]
