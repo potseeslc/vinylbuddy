@@ -2,7 +2,7 @@ version: '3.8'
 
 services:
   vinylbuddy:
-    image: potseeslc/vinylbuddy:lastfm-fix-multiarch
+    image: potseeslc/vinylbuddy:latest
     container_name: vinylbuddy
     ports:
       - "3000:3000"
