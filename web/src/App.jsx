@@ -6,18 +6,9 @@ export default function App() {
   const [status, setStatus] = useState("Idle");
   const [result, setResult] = useState(null);
   const [continuousMode, setContinuousMode] = useState(false); // Start on initial screen
-  const [config, setConfig] = useState({ musicbrainz_contact: false });
   const [lastDetectionTime, setLastDetectionTime] = useState(null); // Track last detection time
   const inactivityTimeout = 5 * 60 * 1000; // 5 minutes inactivity timeout
   const inactivityTimerRef = useRef(null);
-
-  // Load configuration on startup
-  useEffect(() => {
-    fetch("/api/config")
-      .then(res => res.json())
-      .then(data => setConfig(data))
-      .catch(err => console.log("Could not load config", err));
-  }, []);
 
   // Handle continuous listening results
   const handleContinuousResult = (result) => {

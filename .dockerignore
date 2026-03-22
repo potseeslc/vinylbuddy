@@ -1,0 +1,12 @@
+.git
+.gitignore
+.DS_Store
+node_modules
+api/node_modules
+web/node_modules
+api/uploads
+web/dist
+api/src/.env
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*

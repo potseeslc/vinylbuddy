@@ -1,9 +1,10 @@
 import Fastify from "fastify";
 import multipart from "@fastify/multipart";
+import rateLimit from "@fastify/rate-limit";
 import fastifyStatic from "@fastify/static";
 import { v4 as uuidv4 } from "uuid";
 import axios from "axios";
-import { exec } from "child_process";
+import { execFile } from "child_process";
 import { promisify } from "util";
 import fs from "fs";
 import path from "path";
@@ -19,7 +20,7 @@ const shazam = new Shazam();
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const execPromise = promisify(exec);
+const execFilePromise = promisify(execFile);
 
 const fastify = Fastify({ 
   logger: true,
@@ -28,24 +29,92 @@ const fastify = Fastify({
 
 // Configuration setup
 const uploadsDir = path.join(__dirname, 'uploads');
-const configPath = path.join(__dirname, '.env');
+const helperScript = path.join(__dirname, 'fpcalc-helper.sh');
+const ACOUSTID_API_KEY = process.env.ACOUSTID_API_KEY || "";
+const MUSICBRAINZ_CONTACT = process.env.MUSICBRAINZ_CONTACT || "";
+const MUSICBRAINZ_USER_AGENT = MUSICBRAINZ_CONTACT
+  ? `VinylBuddy/1.0 (${MUSICBRAINZ_CONTACT})`
+  : "VinylBuddy/1.0 (https://github.com/potseeslc/vinylbuddy)";
+const MIME_TYPE_TO_EXTENSION = {
+  "audio/webm": "webm",
+  "audio/webm;codecs=opus": "webm",
+  "audio/ogg": "ogg",
+  "audio/ogg;codecs=opus": "ogg",
+  "audio/wav": "wav",
+  "audio/wave": "wav",
+  "audio/x-wav": "wav",
+  "audio/mpeg": "mp3",
+  "audio/mp3": "mp3",
+  "audio/mp4": "mp4",
+  "audio/x-m4a": "m4a",
+  "audio/flac": "flac",
+  "audio/x-flac": "flac",
+};
 
 // Ensure uploads directory exists
 if (!fs.existsSync(uploadsDir)) {
   fs.mkdirSync(uploadsDir, { recursive: true });
 }
 
-// Load configuration
-let config = {};
-if (fs.existsSync(configPath)) {
-  const configContent = fs.readFileSync(configPath, 'utf8');
-  const lines = configContent.split('\n');
-  for (const line of lines) {
-    const [key, value] = line.split('=');
-    if (key && value) {
-      config[key.trim()] = value.trim();
-    }
+function sanitizeExtension(filename, mimetype) {
+  const mimeExtension = MIME_TYPE_TO_EXTENSION[mimetype];
+  if (mimeExtension) {
+    return mimeExtension;
   }
+
+  const rawExtension = path.extname(filename || "").replace(".", "").toLowerCase();
+  if (/^[a-z0-9]{1,8}$/.test(rawExtension)) {
+    return rawExtension;
+  }
+
+  return "webm";
+}
+
+async function persistUpload(part) {
+  const fileId = uuidv4();
+  const ext = sanitizeExtension(part.filename, part.mimetype);
+  const filename = `${fileId}.${ext}`;
+  const filepath = path.join(uploadsDir, filename);
+
+  const fileStream = fs.createWriteStream(filepath);
+  await promisify(streamPipeline)(part.file, fileStream);
+
+  const stats = await fs.promises.stat(filepath);
+  if (stats.size === 0) {
+    await cleanupFiles([filepath]);
+    const error = new Error("Empty audio file received");
+    error.statusCode = 400;
+    throw error;
+  }
+
+  return { fileId, filename, filepath, stats };
+}
+
+async function cleanupFiles(paths) {
+  await Promise.all(paths.filter(Boolean).map(async (targetPath) => {
+    try {
+      await fs.promises.unlink(targetPath);
+    } catch (error) {
+      if (error.code !== "ENOENT") {
+        fastify.log.warn(`Could not clean up file ${targetPath}: ${error.message}`);
+      }
+    }
+  }));
+}
+
+async function convertToWav(inputPath, outputPath) {
+  await execFilePromise("ffmpeg", [
+    "-i", inputPath,
+    "-acodec", "pcm_s16le",
+    "-ar", "44100",
+    "-ac", "2",
+    outputPath,
+    "-y",
+  ]);
+}
+
+async function generateFingerprint(wavPath, fingerprintPath) {
+  await execFilePromise("sh", [helperScript, wavPath, fingerprintPath]);
 }
 
 // Register JSON body parser
@@ -66,99 +135,44 @@ fastify.register(multipart, {
   },
 });
 
+fastify.register(rateLimit, {
+  global: false,
+  errorResponseBuilder: () => ({
+    success: false,
+    error: "Too many requests",
+    message: "Please wait a moment before sending another audio sample.",
+  }),
+});
+
+const heavyRouteConfig = {
+  config: {
+    rateLimit: {
+      max: 20,
+      timeWindow: "1 minute",
+    },
+  },
+};
+
 // Health check endpoint
 fastify.get("/api/health", async () => ({ ok: true }));
 
-// Configuration endpoints
-fastify.get("/api/config", async () => {
-  return {
-    musicbrainz_contact: !!config.MUSICBRAINZ_CONTACT
-  };
-});
-
-fastify.post("/api/config", async (req, reply) => {
-  try {
-    const { musicbrainzContact } = req.body;
-    
-    // Validate input
-    if (!musicbrainzContact) {
-      return reply.code(400).send({ error: "MusicBrainz contact is required" });
-    }
-    
-    // Update config
-    config.MUSICBRAINZ_CONTACT = musicbrainzContact;
-    
-    // Save to file - only save the keys we care about
-    let configContent = '';
-    const configKeys = ['MUSICBRAINZ_CONTACT'];
-    for (const key of configKeys) {
-      if (config[key]) {
-        configContent += `${key}=${config[key]}\n`;
-      }
-    }
-    
-    fs.writeFileSync(configPath, configContent);
-    
-    return {
-      success: true,
-      message: "Configuration updated successfully",
-      config: {
-        musicbrainz_contact: !!config.MUSICBRAINZ_CONTACT
-      }
-    };
-  } catch (error) {
-    fastify.log.error(`Config update error: ${error.message}`);
-    return reply.code(500).send({ 
-      success: false,
-      error: 'Failed to update configuration',
-      message: error.message 
-    });
-  }
-});
-
 // Upload endpoint: expects multipart/form-data field name "audio"
-fastify.post("/api/identify", async (req, reply) => {
+fastify.post("/api/identify", heavyRouteConfig, async (req, reply) => {
   try {
     const part = await req.file();
     if (!part) return reply.code(400).send({ error: "Missing file field 'audio'" });
 
-    // Generate unique filename
-    const fileId = uuidv4();
-    const ext = part.filename?.split('.').pop() || 'webm';
-    const filename = `${fileId}.${ext}`;
-    const filepath = path.join(uploadsDir, filename);
-    
-    // Save file to disk
-    const fileStream = fs.createWriteStream(filepath);
-    await promisify(streamPipeline)(part.file, fileStream);
-
-    // Get file size
-    const stats = fs.statSync(filepath);
-    
-    // Check if file is empty
-    if (stats.size === 0) {
-      fastify.log.warn(`Received empty file: ${filename}`);
-      return reply.code(400).send({ 
-        success: false, 
-        error: 'Empty audio file received',
-        message: 'The recorded audio file is empty. Please make sure your microphone is working and try again.' 
-      });
-    }
+    const { fileId, filename, filepath, stats } = await persistUpload(part);
     
     fastify.log.info(`Saved file: ${filename}, size: ${stats.size} bytes`);
 
-    // Convert to WAV if needed using ffmpeg
     const wavFilepath = path.join(uploadsDir, `${fileId}.wav`);
-    await execPromise(`ffmpeg -i "${filepath}" -acodec pcm_s16le -ar 44100 -ac 2 "${wavFilepath}" -y`);
+    await convertToWav(filepath, wavFilepath);
     
     fastify.log.info(`Converted to WAV: ${wavFilepath}`);
 
-    // Generate fingerprint using fpcalc helper script
     const fingerprintFile = path.join(uploadsDir, `${fileId}.fingerprint`);
-    const helperScript = path.join(__dirname, 'fpcalc-helper.sh');
-    
-    // Make sure the script is executable and run it
-    await execPromise(`sh "${helperScript}" "${wavFilepath}" "${fingerprintFile}"`);
+    await generateFingerprint(wavFilepath, fingerprintFile);
     
     fastify.log.info(`Generated fingerprint: ${fingerprintFile}`);
 
@@ -180,17 +194,20 @@ fastify.post("/api/identify", async (req, reply) => {
     fastify.log.info(`Fingerprint: ${fingerprint.substring(0, 50)}... Duration: ${duration}s`);
 
     // If we have a valid fingerprint, query AcoustID
-    if (fingerprint && (config.ACOUSTID_API_KEY || process.env.ACOUSTID_API_KEY)) {
+    if (fingerprint && ACOUSTID_API_KEY) {
       try {
         const acoustidParams = {
-          client: config.ACOUSTID_API_KEY || process.env.ACOUSTID_API_KEY,
+          client: ACOUSTID_API_KEY,
           duration: Math.round(duration),
           fingerprint: fingerprint,
           meta: 'recordings+releases',
           format: 'json'
         };
         
-        fastify.log.info(`Calling AcoustID with params: ${JSON.stringify(acoustidParams)}`);
+        fastify.log.info({
+          duration: acoustidParams.duration,
+          hasFingerprint: !!acoustidParams.fingerprint,
+        }, "Calling AcoustID lookup");
         
         // Use a more explicit approach for the API call
         const acoustidResponse = await axios({
@@ -241,7 +258,7 @@ fastify.post("/api/identify", async (req, reply) => {
                   inc: 'recordings+artist-credits+labels+release-groups'
                 },
                 headers: {
-                  'User-Agent': config.MUSICBRAINZ_CONTACT || process.env.MUSICBRAINZ_CONTACT || 'VinylNowPlaying/1.0 (https://github.com)'
+                  'User-Agent': MUSICBRAINZ_USER_AGENT
                 }
               });
               
@@ -269,13 +286,7 @@ fastify.post("/api/identify", async (req, reply) => {
               }
               
               // Clean up files
-              try {
-                fs.unlinkSync(filepath);
-                fs.unlinkSync(wavFilepath);
-                fs.unlinkSync(fingerprintFile);
-              } catch (cleanupError) {
-                fastify.log.warn(`Could not clean up files: ${cleanupError.message}`);
-              }
+              await cleanupFiles([filepath, wavFilepath, fingerprintFile]);
               
               return {
                 success: true,
@@ -303,13 +314,7 @@ fastify.post("/api/identify", async (req, reply) => {
               fastify.log.error(`MusicBrainz error: ${mbError.message}`);
               
               // Clean up files
-              try {
-                fs.unlinkSync(filepath);
-                fs.unlinkSync(wavFilepath);
-                fs.unlinkSync(fingerprintFile);
-              } catch (cleanupError) {
-                fastify.log.warn(`Could not clean up files: ${cleanupError.message}`);
-              }
+              await cleanupFiles([filepath, wavFilepath, fingerprintFile]);
               
               return {
                 success: false,
@@ -321,13 +326,7 @@ fastify.post("/api/identify", async (req, reply) => {
         }
         
         // Clean up files
-        try {
-          fs.unlinkSync(filepath);
-          fs.unlinkSync(wavFilepath);
-          fs.unlinkSync(fingerprintFile);
-        } catch (cleanupError) {
-          fastify.log.warn(`Could not clean up files: ${cleanupError.message}`);
-        }
+        await cleanupFiles([filepath, wavFilepath, fingerprintFile]);
         
         return {
           success: false,
@@ -345,13 +344,7 @@ fastify.post("/api/identify", async (req, reply) => {
         }
         
         // Clean up files
-        try {
-          fs.unlinkSync(filepath);
-          fs.unlinkSync(wavFilepath);
-          fs.unlinkSync(fingerprintFile);
-        } catch (cleanupError) {
-          fastify.log.warn(`Could not clean up files: ${cleanupError.message}`);
-        }
+        await cleanupFiles([filepath, wavFilepath, fingerprintFile]);
         
         return {
           success: false,
@@ -361,15 +354,7 @@ fastify.post("/api/identify", async (req, reply) => {
       }
     } else {
       // Clean up files
-      try {
-        fs.unlinkSync(filepath);
-        fs.unlinkSync(wavFilepath);
-        if (fs.existsSync(fingerprintFile)) {
-          fs.unlinkSync(fingerprintFile);
-        }
-      } catch (cleanupError) {
-        fastify.log.warn(`Could not clean up files: ${cleanupError.message}`);
-      }
+      await cleanupFiles([filepath, wavFilepath, fingerprintFile]);
       
       return {
         success: false,
@@ -383,6 +368,13 @@ fastify.post("/api/identify", async (req, reply) => {
     }
   } catch (error) {
     fastify.log.error(`Server error: ${error.message}`);
+    if (error.statusCode === 400 && error.message === "Empty audio file received") {
+      return reply.code(400).send({
+        success: false,
+        error: 'Empty audio file received',
+        message: 'The recorded audio file is empty. Please make sure your microphone is working and try again.'
+      });
+    }
     return reply.code(500).send({ 
       success: false,
       error: 'Server error occurred during processing',
@@ -451,7 +443,7 @@ fastify.post("/api/identify-metadata", async (req, reply) => {
             limit: 10  // Get more results to choose from
           },
           headers: {
-            'User-Agent': config.MUSICBRAINZ_CONTACT || process.env.MUSICBRAINZ_CONTACT || 'VinylNowPlaying/1.0 (https://github.com)'
+            'User-Agent': MUSICBRAINZ_USER_AGENT
           }
         });
         
@@ -555,7 +547,7 @@ fastify.post("/api/identify-metadata", async (req, reply) => {
                 inc: 'recordings+artist-credits+labels+release-groups'
               },
               headers: {
-                'User-Agent': config.MUSICBRAINZ_CONTACT || process.env.MUSICBRAINZ_CONTACT || 'VinylNowPlaying/1.0 (https://github.com)'
+                'User-Agent': MUSICBRAINZ_USER_AGENT
               }
             });
             releaseInfo = releaseResponse.data;
@@ -629,7 +621,7 @@ fastify.post("/api/identify-metadata", async (req, reply) => {
 });
 
 // Enhanced identification endpoint that tries both methods
-fastify.post("/api/identify-hybrid", async (req, reply) => {
+fastify.post("/api/identify-hybrid", heavyRouteConfig, async (req, reply) => {
   try {
     // First, try to process uploaded audio file (your existing method)
     let audioResult = null;
@@ -642,38 +634,27 @@ fastify.post("/api/identify-hybrid", async (req, reply) => {
       
       const part = await req.file();
       if (part) {
-        // Generate unique filename
-        const fileId = uuidv4();
-        const ext = part.filename?.split('.').pop() || 'webm';
-        const filename = `${fileId}.${ext}`;
-        const filepath = path.join(uploadsDir, filename);
-        
-        // Save file to disk
-        const fileStream = fs.createWriteStream(filepath);
-        await promisify(streamPipeline)(part.file, fileStream);
+        let upload;
 
-        // Get file size
-        const stats = fs.statSync(filepath);
-        
-        // Check if file is empty
-        if (stats.size === 0) {
-          fastify.log.warn(`Received empty file: ${filename}`);
-          audioError = 'Empty audio file received';
-        } else {
+        try {
+          upload = await persistUpload(part);
+        } catch (uploadError) {
+          audioError = uploadError.message;
+        }
+
+        if (upload) {
+          const { fileId, filename, filepath, stats } = upload;
           fastify.log.info(`Saved file: ${filename}, size: ${stats.size} bytes`);
 
           // Convert to WAV if needed using ffmpeg
           const wavFilepath = path.join(uploadsDir, `${fileId}.wav`);
-          await execPromise(`ffmpeg -i "${filepath}" -acodec pcm_s16le -ar 44100 -ac 2 "${wavFilepath}" -y`);
+          await convertToWav(filepath, wavFilepath);
           
           fastify.log.info(`Converted to WAV: ${wavFilepath}`);
 
           // Generate fingerprint using fpcalc helper script
           const fingerprintFile = path.join(uploadsDir, `${fileId}.fingerprint`);
-          const helperScript = path.join(__dirname, 'fpcalc-helper.sh');
-          
-          // Make sure the script is executable and run it
-          await execPromise(`sh "${helperScript}" "${wavFilepath}" "${fingerprintFile}"`);
+          await generateFingerprint(wavFilepath, fingerprintFile);
           
           fastify.log.info(`Generated fingerprint: ${fingerprintFile}`);
 
@@ -695,17 +676,20 @@ fastify.post("/api/identify-hybrid", async (req, reply) => {
           fastify.log.info(`Fingerprint: ${fingerprint.substring(0, 50)}... Duration: ${duration}s`);
 
           // If we have a valid fingerprint, query AcoustID
-          if (fingerprint && (config.ACOUSTID_API_KEY || process.env.ACOUSTID_API_KEY)) {
+          if (fingerprint && (ACOUSTID_API_KEY)) {
             try {
               const acoustidParams = {
-                client: config.ACOUSTID_API_KEY || process.env.ACOUSTID_API_KEY,
+                client: ACOUSTID_API_KEY,
                 duration: Math.round(duration),
                 fingerprint: fingerprint,
                 meta: 'recordings+releases',
                 format: 'json'
               };
               
-              fastify.log.info(`Calling AcoustID with params: ${JSON.stringify(acoustidParams)}`);
+              fastify.log.info({
+                duration: acoustidParams.duration,
+                hasFingerprint: !!acoustidParams.fingerprint,
+              }, "Calling AcoustID lookup");
               
               // Use a more explicit approach for the API call
               const acoustidResponse = await axios({
@@ -756,7 +740,7 @@ fastify.post("/api/identify-hybrid", async (req, reply) => {
                         inc: 'recordings+artist-credits+labels+release-groups'
                       },
                       headers: {
-                        'User-Agent': config.MUSICBRAINZ_CONTACT || process.env.MUSICBRAINZ_CONTACT || 'VinylNowPlaying/1.0 (https://github.com)'
+                        'User-Agent': MUSICBRAINZ_USER_AGENT
                       }
                     });
                     
@@ -784,13 +768,7 @@ fastify.post("/api/identify-hybrid", async (req, reply) => {
                     }
                     
                     // Clean up files
-                    try {
-                      fs.unlinkSync(filepath);
-                      fs.unlinkSync(wavFilepath);
-                      fs.unlinkSync(fingerprintFile);
-                    } catch (cleanupError) {
-                      fastify.log.warn(`Could not clean up files: ${cleanupError.message}`);
-                    }
+                    await cleanupFiles([filepath, wavFilepath, fingerprintFile]);
                     
                     audioResult = {
                       success: true,
@@ -819,13 +797,7 @@ fastify.post("/api/identify-hybrid", async (req, reply) => {
                     fastify.log.error(`MusicBrainz error: ${mbError.message}`);
                     
                     // Clean up files
-                    try {
-                      fs.unlinkSync(filepath);
-                      fs.unlinkSync(wavFilepath);
-                      fs.unlinkSync(fingerprintFile);
-                    } catch (cleanupError) {
-                      fastify.log.warn(`Could not clean up files: ${cleanupError.message}`);
-                    }
+                    await cleanupFiles([filepath, wavFilepath, fingerprintFile]);
                     
                     audioResult = {
                       success: false,
@@ -836,13 +808,7 @@ fastify.post("/api/identify-hybrid", async (req, reply) => {
                   }
                 } else {
                   // Clean up files
-                  try {
-                    fs.unlinkSync(filepath);
-                    fs.unlinkSync(wavFilepath);
-                    fs.unlinkSync(fingerprintFile);
-                  } catch (cleanupError) {
-                    fastify.log.warn(`Could not clean up files: ${cleanupError.message}`);
-                  }
+                  await cleanupFiles([filepath, wavFilepath, fingerprintFile]);
                   
                   audioResult = {
                     success: false,
@@ -853,13 +819,7 @@ fastify.post("/api/identify-hybrid", async (req, reply) => {
                 }
               } else {
                 // Clean up files
-                try {
-                  fs.unlinkSync(filepath);
-                  fs.unlinkSync(wavFilepath);
-                  fs.unlinkSync(fingerprintFile);
-                } catch (cleanupError) {
-                  fastify.log.warn(`Could not clean up files: ${cleanupError.message}`);
-                }
+                await cleanupFiles([filepath, wavFilepath, fingerprintFile]);
                 
                 audioResult = {
                   success: false,
@@ -879,13 +839,7 @@ fastify.post("/api/identify-hybrid", async (req, reply) => {
               }
               
               // Clean up files
-              try {
-                fs.unlinkSync(filepath);
-                fs.unlinkSync(wavFilepath);
-                fs.unlinkSync(fingerprintFile);
-              } catch (cleanupError) {
-                fastify.log.warn(`Could not clean up files: ${cleanupError.message}`);
-              }
+              await cleanupFiles([filepath, wavFilepath, fingerprintFile]);
               
               audioResult = {
                 success: false,
@@ -896,15 +850,7 @@ fastify.post("/api/identify-hybrid", async (req, reply) => {
             }
           } else {
             // Clean up files
-            try {
-              fs.unlinkSync(filepath);
-              fs.unlinkSync(wavFilepath);
-              if (fs.existsSync(fingerprintFile)) {
-                fs.unlinkSync(fingerprintFile);
-              }
-            } catch (cleanupError) {
-              fastify.log.warn(`Could not clean up files: ${cleanupError.message}`);
-            }
+            await cleanupFiles([filepath, wavFilepath, fingerprintFile]);
             
             audioResult = {
               success: false,
@@ -944,7 +890,7 @@ fastify.post("/api/identify-hybrid", async (req, reply) => {
             limit: 5
           },
           headers: {
-            'User-Agent': config.MUSICBRAINZ_CONTACT || process.env.MUSICBRAINZ_CONTACT || 'VinylNowPlaying/1.0 (https://github.com)'
+            'User-Agent': MUSICBRAINZ_USER_AGENT
           }
         });
         
@@ -966,7 +912,7 @@ fastify.post("/api/identify-hybrid", async (req, reply) => {
                   inc: 'recordings+artist-credits+labels+release-groups'
                 },
                 headers: {
-                  'User-Agent': config.MUSICBRAINZ_CONTACT || process.env.MUSICBRAINZ_CONTACT || 'VinylNowPlaying/1.0 (https://github.com)'
+                  'User-Agent': MUSICBRAINZ_USER_AGENT
                 }
               });
               releaseInfo = releaseResponse.data;
@@ -1049,7 +995,7 @@ fastify.post("/api/identify-hybrid", async (req, reply) => {
             limit: 5
           },
           headers: {
-            'User-Agent': config.MUSICBRAINZ_CONTACT || process.env.MUSICBRAINZ_CONTACT || 'VinylNowPlaying/1.0 (https://github.com)'
+            'User-Agent': MUSICBRAINZ_USER_AGENT
           }
         });
         
@@ -1071,7 +1017,7 @@ fastify.post("/api/identify-hybrid", async (req, reply) => {
                   inc: 'recordings+artist-credits+labels+release-groups'
                 },
                 headers: {
-                  'User-Agent': config.MUSICBRAINZ_CONTACT || process.env.MUSICBRAINZ_CONTACT || 'VinylNowPlaying/1.0 (https://github.com)'
+                  'User-Agent': MUSICBRAINZ_USER_AGENT
                 }
               });
               releaseInfo = releaseResponse.data;
@@ -1145,7 +1091,7 @@ fastify.post("/api/identify-hybrid", async (req, reply) => {
 });
 
 // Fallback route for debugging
-fastify.post("/api/debug-upload", async (req, reply) => {
+fastify.post("/api/debug-upload", heavyRouteConfig, async (req, reply) => {
   const part = await req.file();
   if (!part) return reply.code(400).send({ error: "Missing file field 'audio'" });
 
@@ -1163,41 +1109,20 @@ fastify.post("/api/debug-upload", async (req, reply) => {
 });
 
 // New endpoint for Shazam recognition
-fastify.post("/api/identify-shazam", async (req, reply) => {
+fastify.post("/api/identify-shazam", heavyRouteConfig, async (req, reply) => {
   fastify.log.info("Shazam identification endpoint called");
   
   try {
     const part = await req.file();
     if (!part) return reply.code(400).send({ error: "Missing file field 'audio'" });
 
-    // Generate unique filename
-    const fileId = uuidv4();
-    const ext = part.filename?.split('.').pop() || 'webm';
-    const filename = `${fileId}.${ext}`;
-    const filepath = path.join(uploadsDir, filename);
-    
-    // Save file to disk
-    const fileStream = fs.createWriteStream(filepath);
-    await promisify(streamPipeline)(part.file, fileStream);
-
-    // Get file size
-    const stats = fs.statSync(filepath);
-    
-    // Check if file is empty
-    if (stats.size === 0) {
-      fastify.log.warn(`Received empty file: ${filename}`);
-      return reply.code(400).send({ 
-        success: false, 
-        error: 'Empty audio file received',
-        message: 'The recorded audio file is empty. Please make sure your microphone is working and try again.' 
-      });
-    }
+    const { fileId, filename, filepath, stats } = await persistUpload(part);
     
     fastify.log.info(`Saved file: ${filename}, size: ${stats.size} bytes`);
 
     // Convert to WAV if needed using ffmpeg (Shazam works best with WAV)
     const wavFilepath = path.join(uploadsDir, `${fileId}.wav`);
-    await execPromise(`ffmpeg -i "${filepath}" -acodec pcm_s16le -ar 44100 -ac 2 "${wavFilepath}" -y`);
+    await convertToWav(filepath, wavFilepath);
     
     fastify.log.info(`Converted to WAV for Shazam: ${wavFilepath}`);
 
@@ -1206,17 +1131,10 @@ fastify.post("/api/identify-shazam", async (req, reply) => {
       const shazamResult = await shazam.recognise(wavFilepath);
       
       // Clean up files
-      try {
-        fs.unlinkSync(filepath);
-        fs.unlinkSync(wavFilepath);
-      } catch (cleanupError) {
-        fastify.log.warn(`Could not clean up files: ${cleanupError.message}`);
-      }
+      await cleanupFiles([filepath, wavFilepath]);
       
       if (shazamResult && shazamResult.matches && shazamResult.matches.length > 0) {
         // Get the best match
-        const bestMatch = shazamResult.matches[0];
-        
         // Extract relevant information
         const trackInfo = shazamResult.track;
         
@@ -1290,12 +1208,7 @@ fastify.post("/api/identify-shazam", async (req, reply) => {
       fastify.log.error(`Shazam error: ${shazamError.message}`);
       
       // Clean up files
-      try {
-        fs.unlinkSync(filepath);
-        fs.unlinkSync(wavFilepath);
-      } catch (cleanupError) {
-        fastify.log.warn(`Could not clean up files: ${cleanupError.message}`);
-      }
+      await cleanupFiles([filepath, wavFilepath]);
       
       return {
         success: false,
@@ -1305,6 +1218,13 @@ fastify.post("/api/identify-shazam", async (req, reply) => {
     }
   } catch (error) {
     fastify.log.error(`Server error: ${error.message}`);
+    if (error.statusCode === 400 && error.message === "Empty audio file received") {
+      return reply.code(400).send({
+        success: false,
+        error: 'Empty audio file received',
+        message: 'The recorded audio file is empty. Please make sure your microphone is working and try again.'
+      });
+    }
     return reply.code(500).send({ 
       success: false,
       error: 'Server error occurred during processing',
@@ -1314,40 +1234,19 @@ fastify.post("/api/identify-shazam", async (req, reply) => {
 });
 
 // Enhanced endpoint that uses ONLY Shazam for recognition
-fastify.post("/api/identify-enhanced", async (req, reply) => {
+fastify.post("/api/identify-enhanced", heavyRouteConfig, async (req, reply) => {
   try {
     // Store the uploaded file for Shazam recognition
     const part = await req.file();
     if (!part) return reply.code(400).send({ error: "Missing file field 'audio'" });
 
-    // Generate unique filename
-    const fileId = uuidv4();
-    const ext = part.filename?.split('.').pop() || 'webm';
-    const filename = `${fileId}.${ext}`;
-    const filepath = path.join(uploadsDir, filename);
-    
-    // Save file to disk
-    const fileStream = fs.createWriteStream(filepath);
-    await promisify(streamPipeline)(part.file, fileStream);
-
-    // Get file size
-    const stats = fs.statSync(filepath);
-    
-    // Check if file is empty
-    if (stats.size === 0) {
-      fastify.log.warn(`Received empty file: ${filename}`);
-      return reply.code(400).send({ 
-        success: false, 
-        error: 'Empty audio file received',
-        message: 'The recorded audio file is empty. Please make sure your microphone is working and try again.' 
-      });
-    }
+    const { fileId, filename, filepath, stats } = await persistUpload(part);
     
     fastify.log.info(`Saved file: ${filename}, size: ${stats.size} bytes`);
 
     // Convert to WAV for Shazam (Shazam works best with WAV)
     const wavFilepath = path.join(uploadsDir, `${fileId}.wav`);
-    await execPromise(`ffmpeg -i "${filepath}" -acodec pcm_s16le -ar 44100 -ac 2 "${wavFilepath}" -y`);
+    await convertToWav(filepath, wavFilepath);
     
     fastify.log.info(`Converted to WAV for Shazam: ${wavFilepath}`);
 
@@ -1434,12 +1333,7 @@ fastify.post("/api/identify-enhanced", async (req, reply) => {
     }
     
     // Clean up files
-    try {
-      fs.unlinkSync(filepath);
-      fs.unlinkSync(wavFilepath);
-    } catch (cleanupError) {
-      fastify.log.warn(`Could not clean up files: ${cleanupError.message}`);
-    }
+    await cleanupFiles([filepath, wavFilepath]);
     
     // Return the result
     return result || {
@@ -1449,6 +1343,13 @@ fastify.post("/api/identify-enhanced", async (req, reply) => {
     
   } catch (error) {
     fastify.log.error(`Server error: ${error.message}`);
+    if (error.statusCode === 400 && error.message === "Empty audio file received") {
+      return reply.code(400).send({
+        success: false,
+        error: 'Empty audio file received',
+        message: 'The recorded audio file is empty. Please make sure your microphone is working and try again.'
+      });
+    }
     return reply.code(500).send({ 
       success: false,
       error: 'Server error occurred during processing',

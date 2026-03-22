@@ -24,15 +24,22 @@ Vinyl Buddy is a self-hosted web application that helps you identify vinyl recor
 1. Clone the repository:
 ```bash
 git clone <repository-url>
-cd vinyl-now-playing
+cd vinylbuddy
 ```
 
-2. Start the service:
+2. Create a local environment file from the example:
+```bash
+cp .env.example .env
+```
+
+3. Edit `.env` and set at least `MUSICBRAINZ_CONTACT`.
+
+4. Start the service:
 ```bash
 docker-compose up -d
 ```
 
-3. Access the application in your browser at http://localhost:3000
+5. Access the application in your browser at http://localhost:3000
 
 ## Usage
 
@@ -66,7 +73,7 @@ Pre-built Docker images are available on Docker Hub:
 docker pull potseeslc/vinylbuddy:latest
 ```
 
-Or use the included docker-compose.yml file to build and run the application.
+Or use the included `docker-compose.yml` file with a local `.env` file to run the application.
 
 ## Building from Source
 
@@ -103,14 +110,12 @@ After creating the application, you'll see:
 
 ### 3. Configure Environment Variables
 
-Uncomment and set the following environment variables in your docker-compose.yml:
+Set the following variables in your local `.env` file:
 
-```yaml
-environment:
-  # ... other variables
-  - LASTFM_API_KEY=your_api_key_here
-  - LASTFM_SECRET=your_shared_secret_here
-  - LASTFM_USERNAME=your_lastfm_username
+```dotenv
+LASTFM_API_KEY=your_api_key_here
+LASTFM_SECRET=your_shared_secret_here
+LASTFM_USERNAME=your_lastfm_username
 ```
 
 ### 4. Get Your Session Key
@@ -127,11 +132,9 @@ The session key is required for scrobbling. To obtain it:
    ```bash
    docker exec -it vinylbuddy node src/get-session-key.js YOUR_TOKEN_HERE
    ```
-5. Add the session key to your docker-compose.yml:
-   ```yaml
-   environment:
-     # ... other variables
-     - LASTFM_SESSION_KEY=your_session_key_here
+5. Add the session key to your local `.env` file:
+   ```dotenv
+   LASTFM_SESSION_KEY=your_session_key_here
    ```
 
 ### 5. Restart the Container
