@@ -1,0 +1,13 @@
+{
+  "domain": "vinylbuddy",
+  "name": "Vinyl Buddy",
+  "codeowners": ["@potseeslc"],
+  "config_flow": true,
+  "documentation": "https://github.com/potseeslc/vinylbuddy",
+  "integration_type": "service",
+  "iot_class": "local_polling",
+  "issue_tracker": "https://github.com/potseeslc/vinylbuddy/issues",
+  "loggers": ["custom_components.vinylbuddy"],
+  "requirements": [],
+  "version": "0.1.0"
+}

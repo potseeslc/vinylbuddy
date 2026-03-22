@@ -64,6 +64,41 @@ docker-compose up -d
   - MusicBrainz for metadata lookup
   - Cover Art Archive for album artwork
 
+## Home Assistant Integration
+
+This repository now includes a Home Assistant custom integration under `custom_components/vinylbuddy`.
+
+Vinyl Buddy also exposes a lightweight now-playing endpoint for Home Assistant:
+
+```bash
+GET /api/now_playing
+```
+
+Example response:
+
+```json
+{
+  "state": "playing",
+  "title": "So What",
+  "artist": "Miles Davis",
+  "album": "Kind of Blue",
+  "album_year": "1959",
+  "duration": 545,
+  "image_url": "https://...",
+  "source": "shazam",
+  "updated_at": "2026-03-22T18:00:00Z"
+}
+```
+
+To install the Home Assistant integration manually:
+
+1. Copy `custom_components/vinylbuddy` into your Home Assistant `custom_components` directory
+2. Restart Home Assistant
+3. Add the integration from the UI
+4. Enter the base URL for your Vinyl Buddy instance
+
+The integration exposes Vinyl Buddy as a read-only `media_player` entity with track metadata and album art.
+
 ## Docker Images
 
 Pre-built Docker images are available on Docker Hub:

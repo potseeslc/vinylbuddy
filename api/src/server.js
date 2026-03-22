@@ -46,6 +46,18 @@ const MIME_TYPE_TO_EXTENSION = {
   "audio/flac": "flac",
   "audio/x-flac": "flac",
 };
+const NOW_PLAYING_RESET_AFTER_MS = Number(process.env.NOW_PLAYING_RESET_AFTER_MS || "900000");
+const nowPlayingState = {
+  state: "idle",
+  title: null,
+  artist: null,
+  album: null,
+  album_year: null,
+  duration: null,
+  image_url: null,
+  source: null,
+  updated_at: null,
+};
 
 // Ensure uploads directory exists
 if (!fs.existsSync(uploadsDir)) {
@@ -113,6 +125,49 @@ async function generateFingerprint(wavPath, fingerprintPath) {
   await execFilePromise("sh", [helperScript, wavPath, fingerprintPath]);
 }
 
+function updateNowPlaying(result) {
+  if (!result?.success) {
+    return;
+  }
+
+  const recording = result.recording || {};
+  const release = result.release || {};
+  const updatedAt = new Date().toISOString();
+
+  nowPlayingState.state = "playing";
+  nowPlayingState.title = recording.title || null;
+  nowPlayingState.artist = recording.artist || release.artist || null;
+  nowPlayingState.album = release.title || null;
+  nowPlayingState.album_year = release.date ? String(release.date).split("-")[0] : null;
+  nowPlayingState.duration = recording.duration ? Math.floor(Number(recording.duration)) : null;
+  nowPlayingState.image_url = result.coverArtUrl || null;
+  nowPlayingState.source = result.method || null;
+  nowPlayingState.updated_at = updatedAt;
+}
+
+function getNowPlayingState() {
+  if (!nowPlayingState.updated_at) {
+    return { ...nowPlayingState };
+  }
+
+  const ageMs = Date.now() - Date.parse(nowPlayingState.updated_at);
+  if (Number.isFinite(ageMs) && ageMs > NOW_PLAYING_RESET_AFTER_MS) {
+    return {
+      state: "idle",
+      title: null,
+      artist: null,
+      album: null,
+      album_year: null,
+      duration: null,
+      image_url: null,
+      source: null,
+      updated_at: nowPlayingState.updated_at,
+    };
+  }
+
+  return { ...nowPlayingState };
+}
+
 // Register JSON body parser
 fastify.addContentTypeParser('application/json', { parseAs: 'string' }, function (req, body, done) {
   try {
@@ -152,6 +207,8 @@ const heavyRouteConfig = {
 // Health check endpoint
 fastify.get("/api/health", async () => ({ ok: true }));
 
+fastify.get("/api/now_playing", async () => getNowPlayingState());
+
 // Upload endpoint: expects multipart/form-data field name "audio"
 fastify.post("/api/identify", heavyRouteConfig, async (req, reply) => {
   try {
@@ -189,6 +246,7 @@ fastify.post("/api/identify", heavyRouteConfig, async (req, reply) => {
       };
     }
 
+    updateNowPlaying(result);
     return result;
   } catch (error) {
     fastify.log.error(`Server error: ${error.message}`);
@@ -229,6 +287,7 @@ fastify.post("/api/identify-metadata", async (req, reply) => {
       return reply.code(500).send(result);
     }
 
+    updateNowPlaying(result);
     return result;
   } catch (error) {
     fastify.log.error(`Server error: ${error.message}`);
@@ -280,6 +339,7 @@ fastify.post("/api/identify-hybrid", heavyRouteConfig, async (req, reply) => {
       });
 
       if (metadataResult.success) {
+        updateNowPlaying(metadataResult);
         return {
           success: true,
           method: "hybrid",
@@ -291,17 +351,21 @@ fastify.post("/api/identify-hybrid", heavyRouteConfig, async (req, reply) => {
     }
 
     if (audioResult && audioResult.success) {
+      updateNowPlaying(audioResult);
       return audioResult;
     }
 
     if (artist_hint || album_hint || track_hint) {
-      return identifyByMetadata({
+      const result = await identifyByMetadata({
         artist: artist_hint,
         album: album_hint,
         track: track_hint,
         musicBrainzUserAgent: MUSICBRAINZ_USER_AGENT,
         logger: fastify.log,
       });
+
+      updateNowPlaying(result);
+      return result;
     }
 
     return {
@@ -364,6 +428,7 @@ fastify.post("/api/identify-shazam", heavyRouteConfig, async (req, reply) => {
     });
 
     await cleanupFiles([filepath, wavFilepath]);
+    updateNowPlaying(result);
     return result;
   } catch (error) {
     fastify.log.error(`Server error: ${error.message}`);
@@ -405,6 +470,7 @@ fastify.post("/api/identify-enhanced", heavyRouteConfig, async (req, reply) => {
     });
 
     await cleanupFiles([filepath, wavFilepath]);
+    updateNowPlaying(result);
     return result;
     
   } catch (error) {

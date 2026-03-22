@@ -1,0 +1,18 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "data": {
+          "base_url": "Vinyl Buddy base URL"
+        },
+        "description": "Enter the base URL for your Vinyl Buddy instance."
+      }
+    },
+    "error": {
+      "cannot_connect": "Failed to connect to Vinyl Buddy."
+    },
+    "abort": {
+      "already_configured": "This Vinyl Buddy instance is already configured."
+    }
+  }
+}

@@ -1,0 +1,7 @@
+{
+  "name": "Vinyl Buddy",
+  "content_in_root": false,
+  "domains": ["media_player"],
+  "homeassistant": "2024.6.0",
+  "render_readme": true
+}
