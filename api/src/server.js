@@ -47,6 +47,7 @@ const MIME_TYPE_TO_EXTENSION = {
   "audio/x-flac": "flac",
 };
 const NOW_PLAYING_RESET_AFTER_MS = Number(process.env.NOW_PLAYING_RESET_AFTER_MS || "900000");
+const PORT = Number(process.env.PORT || "3000");
 const nowPlayingState = {
   state: "idle",
   title: null,
@@ -58,6 +59,18 @@ const nowPlayingState = {
   source: null,
   updated_at: null,
 };
+
+function resetNowPlaying(updatedAt = null) {
+  nowPlayingState.state = "idle";
+  nowPlayingState.title = null;
+  nowPlayingState.artist = null;
+  nowPlayingState.album = null;
+  nowPlayingState.album_year = null;
+  nowPlayingState.duration = null;
+  nowPlayingState.image_url = null;
+  nowPlayingState.source = null;
+  nowPlayingState.updated_at = updatedAt;
+}
 
 // Ensure uploads directory exists
 if (!fs.existsSync(uploadsDir)) {
@@ -152,17 +165,7 @@ function getNowPlayingState() {
 
   const ageMs = Date.now() - Date.parse(nowPlayingState.updated_at);
   if (Number.isFinite(ageMs) && ageMs > NOW_PLAYING_RESET_AFTER_MS) {
-    return {
-      state: "idle",
-      title: null,
-      artist: null,
-      album: null,
-      album_year: null,
-      duration: null,
-      image_url: null,
-      source: null,
-      updated_at: nowPlayingState.updated_at,
-    };
+    resetNowPlaying(nowPlayingState.updated_at);
   }
 
   return { ...nowPlayingState };
@@ -205,9 +208,18 @@ const heavyRouteConfig = {
 };
 
 // Health check endpoint
-fastify.get("/api/health", async () => ({ ok: true }));
+fastify.get("/api/health", async () => ({
+  ok: true,
+  service: "vinylbuddy",
+  now_playing_reset_after_ms: NOW_PLAYING_RESET_AFTER_MS,
+}));
 
 fastify.get("/api/now_playing", async () => getNowPlayingState());
+
+fastify.post("/api/clear_now_playing", async () => {
+  resetNowPlaying(new Date().toISOString());
+  return getNowPlayingState();
+});
 
 // Upload endpoint: expects multipart/form-data field name "audio"
 fastify.post("/api/identify", heavyRouteConfig, async (req, reply) => {
@@ -553,8 +565,8 @@ fastify.setNotFoundHandler((req, res) => {
 
 const start = async () => {
   try {
-    await fastify.listen({ host: "0.0.0.0", port: 3000 });
-    console.log('API server listening on port 3000');
+    await fastify.listen({ host: "0.0.0.0", port: PORT });
+    console.log(`API server listening on port ${PORT}`);
   } catch (err) {
     fastify.log.error(err);
     process.exit(1);
