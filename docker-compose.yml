@@ -1,7 +1,8 @@
-version: '3.8'
-
 services:
   vinylbuddy:
+    build:
+      context: .
+      dockerfile: Dockerfile.prod
     image: potseeslc/vinylbuddy:latest
     container_name: vinylbuddy
     ports:
