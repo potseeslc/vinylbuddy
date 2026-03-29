@@ -134,6 +134,23 @@ async function convertToWav(inputPath, outputPath) {
   ]);
 }
 
+async function ensureWavFile(inputPath, fileId) {
+  const isWavInput = path.extname(inputPath).toLowerCase() === ".wav";
+  if (isWavInput) {
+    return {
+      wavFilepath: inputPath,
+      cleanupPaths: [],
+    };
+  }
+
+  const wavFilepath = path.join(uploadsDir, `${fileId}.wav`);
+  await convertToWav(inputPath, wavFilepath);
+  return {
+    wavFilepath,
+    cleanupPaths: [wavFilepath],
+  };
+}
+
 async function generateFingerprint(wavPath, fingerprintPath) {
   await execFilePromise("sh", [helperScript, wavPath, fingerprintPath]);
 }
@@ -231,8 +248,7 @@ fastify.post("/api/identify", heavyRouteConfig, async (req, reply) => {
     
     fastify.log.info(`Saved file: ${filename}, size: ${stats.size} bytes`);
 
-    const wavFilepath = path.join(uploadsDir, `${fileId}.wav`);
-    await convertToWav(filepath, wavFilepath);
+    const { wavFilepath, cleanupPaths } = await ensureWavFile(filepath, fileId);
     
     fastify.log.info(`Converted to WAV: ${wavFilepath}`);
 
@@ -247,7 +263,7 @@ fastify.post("/api/identify", heavyRouteConfig, async (req, reply) => {
       logger: fastify.log,
     });
 
-    await cleanupFiles([filepath, wavFilepath, fingerprintFile]);
+    await cleanupFiles([filepath, ...cleanupPaths, fingerprintFile]);
 
     if (!result.success) {
       return {
@@ -320,10 +336,9 @@ fastify.post("/api/identify-hybrid", heavyRouteConfig, async (req, reply) => {
     if (part) {
       try {
         const { fileId, filepath } = await persistUpload(part);
-        const wavFilepath = path.join(uploadsDir, `${fileId}.wav`);
+        const { wavFilepath, cleanupPaths } = await ensureWavFile(filepath, fileId);
         const fingerprintFile = path.join(uploadsDir, `${fileId}.fingerprint`);
 
-        await convertToWav(filepath, wavFilepath);
         await generateFingerprint(wavFilepath, fingerprintFile);
 
         audioResult = await identifyByFingerprint({
@@ -333,7 +348,7 @@ fastify.post("/api/identify-hybrid", heavyRouteConfig, async (req, reply) => {
           logger: fastify.log,
         });
 
-        await cleanupFiles([filepath, wavFilepath, fingerprintFile]);
+        await cleanupFiles([filepath, ...cleanupPaths, fingerprintFile]);
       } catch (error) {
         fastify.log.error(`Audio processing error: ${error.message}`);
         audioError = error.message;
@@ -428,8 +443,7 @@ fastify.post("/api/identify-shazam", heavyRouteConfig, async (req, reply) => {
     fastify.log.info(`Saved file: ${filename}, size: ${stats.size} bytes`);
 
     // Convert to WAV if needed using ffmpeg (Shazam works best with WAV)
-    const wavFilepath = path.join(uploadsDir, `${fileId}.wav`);
-    await convertToWav(filepath, wavFilepath);
+    const { wavFilepath, cleanupPaths } = await ensureWavFile(filepath, fileId);
     
     fastify.log.info(`Converted to WAV for Shazam: ${wavFilepath}`);
     const result = await identifyByShazam({
@@ -439,7 +453,7 @@ fastify.post("/api/identify-shazam", heavyRouteConfig, async (req, reply) => {
       logger: fastify.log,
     });
 
-    await cleanupFiles([filepath, wavFilepath]);
+    await cleanupFiles([filepath, ...cleanupPaths]);
     updateNowPlaying(result);
     return result;
   } catch (error) {
@@ -470,8 +484,7 @@ fastify.post("/api/identify-enhanced", heavyRouteConfig, async (req, reply) => {
     fastify.log.info(`Saved file: ${filename}, size: ${stats.size} bytes`);
 
     // Convert to WAV for Shazam (Shazam works best with WAV)
-    const wavFilepath = path.join(uploadsDir, `${fileId}.wav`);
-    await convertToWav(filepath, wavFilepath);
+    const { wavFilepath, cleanupPaths } = await ensureWavFile(filepath, fileId);
     
     fastify.log.info(`Converted to WAV for Shazam: ${wavFilepath}`);
     const result = await identifyByShazam({
@@ -481,7 +494,7 @@ fastify.post("/api/identify-enhanced", heavyRouteConfig, async (req, reply) => {
       logger: fastify.log,
     });
 
-    await cleanupFiles([filepath, wavFilepath]);
+    await cleanupFiles([filepath, ...cleanupPaths]);
     updateNowPlaying(result);
     return result;
     
