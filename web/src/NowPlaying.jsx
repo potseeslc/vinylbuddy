@@ -209,12 +209,7 @@ const NowPlaying = ({
       <div className="content" style={{
         width: 'min(1200px, 95vw)'
       }}>
-        <div style={{
-          display: 'flex',
-          gap: 'clamp(40px, 5vw, 64px)',
-          alignItems: 'center',
-          flexWrap: 'wrap'
-        }}>
+        <div className="now-playing-layout">
           {/* Album art */}
           <div className="album-art" style={{
             flex: '1 1 360px',
@@ -249,17 +244,7 @@ const NowPlaying = ({
             )}
           </div>
 
-          {/* Track metadata without scrim (transparent background) */}
-          <div className="track-metadata" style={{
-            flex: '1 1 300px',
-            padding: '0',
-            borderRadius: '0',
-            background: 'none',
-            border: 'none',
-            boxShadow: 'none',
-            backdropFilter: 'none',
-            maxWidth: '600px'
-          }}>
+          <div className="track-metadata">
             {/* Artist name */}
             <div className="artist" style={{
               fontSize: 'clamp(20px, 2.5vw, 28px)',
@@ -333,64 +318,6 @@ const NowPlaying = ({
           </div>
         </div>
       </div>
-
-      <style>{`
-        /* Remove any conflicting styles */
-        .album-art {
-          height: auto !important;
-        }
-        
-        @media (min-width: 768px) {
-          .track-metadata {
-            text-align: left;
-          }
-          
-          .track-metadata .artist,
-          .track-metadata .title,
-          .track-metadata .album,
-          .track-metadata .source {
-            text-align: left;
-          }
-        }
-
-        /* MOBILE - Phone (< 768px) */
-        @media (max-width: 767px) {
-          .content > div {
-            flex-direction: column;
-            text-align: center;
-          }
-          
-          .track-metadata {
-            text-align: center;
-          }
-          
-          .track-metadata .artist,
-          .track-metadata .title,
-          .track-metadata .album,
-          .track-metadata .source {
-            text-align: center;
-          }
-          
-          .album-art {
-            max-width: 300px;
-          }
-        }
-        
-        /* Extra small screens */
-        @media (max-width: 480px) {
-          .now-playing-wrapper {
-            padding: clamp(16px, 5vw, 24px);
-          }
-          
-          .content > div {
-            gap: clamp(15px, 4vw, 24px);
-          }
-          
-          .album-art {
-            max-width: 250px;
-          }
-        }
-      `}</style>
     </div>
   );
 };

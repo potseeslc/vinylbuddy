@@ -114,6 +114,35 @@ button {
   z-index: 2;
 }
 
+.now-playing-layout {
+  display: flex;
+  gap: clamp(40px, 5vw, 64px);
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.track-metadata {
+  flex: 1 1 300px;
+  max-width: 600px;
+  padding: 0;
+  margin: 0;
+  background: transparent !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  outline: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+.track-metadata,
+.track-metadata .artist,
+.track-metadata .title,
+.track-metadata .album,
+.track-metadata .source {
+  text-align: left;
+}
+
 .idle-screen {
   min-height: 100%;
   display: flex;
@@ -180,4 +209,29 @@ button {
 .status-pill.offline {
   background: rgba(47, 16, 16, 0.82);
   color: #ffd8d8;
+}
+
+@media (max-width: 767px) {
+  .now-playing-layout {
+    flex-direction: column;
+    text-align: center;
+  }
+
+  .track-metadata,
+  .track-metadata .artist,
+  .track-metadata .title,
+  .track-metadata .album,
+  .track-metadata .source {
+    text-align: center;
+  }
+
+  .album-art {
+    max-width: 300px;
+  }
+}
+
+@media (max-width: 480px) {
+  .album-art {
+    max-width: 250px;
+  }
 }
