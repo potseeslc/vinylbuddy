@@ -254,9 +254,6 @@ const NowPlaying = ({
             flex: '1 1 300px',
             padding: 'clamp(20px, 3vw, 32px)',
             borderRadius: '20px',
-            background: 'linear-gradient(180deg, rgba(255,255,255,0.06), rgba(255,255,255,0.02))',
-            backdropFilter: 'blur(12px)',
-            border: '1px solid rgba(255,255,255,0.08)',
             maxWidth: '600px'
           }}>
             {/* Artist name */}
