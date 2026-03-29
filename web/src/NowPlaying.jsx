@@ -252,8 +252,12 @@ const NowPlaying = ({
           {/* Track metadata without scrim (transparent background) */}
           <div className="track-metadata" style={{
             flex: '1 1 300px',
-            padding: 'clamp(20px, 3vw, 32px)',
-            borderRadius: '20px',
+            padding: '0',
+            borderRadius: '0',
+            background: 'none',
+            border: 'none',
+            boxShadow: 'none',
+            backdropFilter: 'none',
             maxWidth: '600px'
           }}>
             {/* Artist name */}
