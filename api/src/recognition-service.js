@@ -10,6 +10,19 @@ function buildMusicBrainzHeaders(userAgent) {
   };
 }
 
+function normalizeDurationSeconds(value) {
+  const numericValue = Number(value);
+  if (!Number.isFinite(numericValue) || numericValue <= 0) {
+    return null;
+  }
+
+  if (numericValue > 1000) {
+    return Math.round(numericValue / 1000);
+  }
+
+  return Math.round(numericValue);
+}
+
 export function parseFingerprintData(fingerprintData) {
   let fingerprint = "";
   let duration = 0;
@@ -70,6 +83,83 @@ function toReleaseResult(releaseDetails) {
     })) || [],
     artist: releaseDetails["artist-credit"]?.map((credit) => credit.name).join(", ") || "Unknown Artist",
   };
+}
+
+async function searchMusicBrainzRecording({ artist, album, track, musicBrainzUserAgent }) {
+  const queryParts = [];
+  if (artist) queryParts.push(`artist:"${artist}"`);
+  if (album) queryParts.push(`release:"${album}"`);
+  if (track) queryParts.push(`recording:"${track}"`);
+
+  const fallbackParts = [artist, track, album].filter(Boolean);
+  const queries = [
+    queryParts.join(" AND "),
+    fallbackParts.join(" AND "),
+    fallbackParts.join(" OR "),
+  ].filter((query) => query.trim().length > 0);
+
+  for (const query of queries) {
+    const response = await axios.get("https://musicbrainz.org/ws/2/recording", {
+      params: {
+        query,
+        fmt: "json",
+        limit: 5,
+      },
+      headers: buildMusicBrainzHeaders(musicBrainzUserAgent),
+      timeout: 10000,
+    });
+
+    const bestResult = response.data.recordings?.find((recording) => recording.releases?.length);
+    if (bestResult) {
+      return bestResult;
+    }
+  }
+
+  return null;
+}
+
+async function enrichShazamResultWithMusicBrainz(result, musicBrainzUserAgent, logger) {
+  const needsDate = !result.release?.date;
+  const needsDuration = !normalizeDurationSeconds(result.recording?.duration);
+  if (!needsDate && !needsDuration) {
+    return result;
+  }
+
+  try {
+    const musicBrainzRecording = await searchMusicBrainzRecording({
+      artist: result.recording?.artist,
+      album: result.release?.title,
+      track: result.recording?.title,
+      musicBrainzUserAgent,
+    });
+
+    if (!musicBrainzRecording) {
+      return result;
+    }
+
+    const releaseCandidate = musicBrainzRecording.releases?.find((release) => release.date) || musicBrainzRecording.releases?.[0];
+
+    return {
+      ...result,
+      recording: {
+        ...result.recording,
+        duration: normalizeDurationSeconds(result.recording?.duration) || normalizeDurationSeconds(musicBrainzRecording.length),
+      },
+      release: {
+        ...result.release,
+        title: result.release?.title || releaseCandidate?.title || null,
+        date: result.release?.date || releaseCandidate?.date || null,
+        artist:
+          result.release?.artist ||
+          musicBrainzRecording["artist-credit"]?.map((credit) => credit.name).join(", ") ||
+          null,
+      },
+      coverArtUrl: result.coverArtUrl || null,
+    };
+  } catch (error) {
+    logger.warn(`Could not enrich Shazam result with MusicBrainz: ${error.message}`);
+    return result;
+  }
 }
 
 export async function identifyByFingerprint({
@@ -156,7 +246,7 @@ export async function identifyByFingerprint({
         recording: {
           id: bestRecording.id,
           title: bestRecording.title,
-          duration: bestRecording.duration,
+          duration: normalizeDurationSeconds(bestRecording.duration),
           artists: bestRecording.artists,
         },
         release: toReleaseResult(releaseDetails),
@@ -341,7 +431,7 @@ export async function identifyByMetadata({
         id: bestResult.id,
         title: bestResult.title,
         artist: bestResult["artist-credit"]?.map((credit) => credit.name).join(", ") || "Unknown Artist",
-        duration: bestResult.length,
+        duration: normalizeDurationSeconds(bestResult.length),
       },
       release: releaseInfo
         ? {
@@ -367,6 +457,7 @@ export async function identifyByShazam({
   wavFilepath,
   isLastFmConfigured,
   scrobbleTrack,
+  musicBrainzUserAgent,
   logger,
 }) {
   try {
@@ -394,7 +485,7 @@ export async function identifyByShazam({
         id: trackInfo.key || "unknown",
         title: trackInfo.title || "Unknown Title",
         artist: trackInfo.subtitle || "Unknown Artist",
-        duration: trackInfo.duration || 0,
+        duration: normalizeDurationSeconds(trackInfo.duration),
       },
       release: {
         title: albumTitle,
@@ -405,13 +496,15 @@ export async function identifyByShazam({
       shazamData: shazamResult,
     };
 
+    const enrichedResult = await enrichShazamResultWithMusicBrainz(result, musicBrainzUserAgent, logger);
+
     if (isLastFmConfigured) {
       try {
         const scrobbleResult = await scrobbleTrack(
           trackInfo.subtitle || "Unknown Artist",
           trackInfo.title || "Unknown Title",
           albumTitle,
-          trackInfo.duration || 0,
+          normalizeDurationSeconds(trackInfo.duration) || 0,
         );
 
         logger.info("Scrobble result:", scrobbleResult);
@@ -420,7 +513,7 @@ export async function identifyByShazam({
       }
     }
 
-    return result;
+    return enrichedResult;
   } catch (error) {
     logger.error(`Shazam error: ${error.message}`);
     return {

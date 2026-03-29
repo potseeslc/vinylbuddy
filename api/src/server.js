@@ -164,12 +164,17 @@ function updateNowPlaying(result) {
   const release = result.release || {};
   const updatedAt = new Date().toISOString();
 
+  const rawDuration = Number(recording.duration);
+  const durationSeconds = Number.isFinite(rawDuration) && rawDuration > 0
+    ? (rawDuration > 1000 ? Math.floor(rawDuration / 1000) : Math.floor(rawDuration))
+    : null;
+
   nowPlayingState.state = "playing";
   nowPlayingState.title = recording.title || null;
   nowPlayingState.artist = recording.artist || release.artist || null;
   nowPlayingState.album = release.title || null;
   nowPlayingState.album_year = release.date ? String(release.date).split("-")[0] : null;
-  nowPlayingState.duration = recording.duration ? Math.floor(Number(recording.duration)) : null;
+  nowPlayingState.duration = durationSeconds;
   nowPlayingState.image_url = result.coverArtUrl || null;
   nowPlayingState.source = result.method || null;
   nowPlayingState.updated_at = updatedAt;
@@ -450,6 +455,7 @@ fastify.post("/api/identify-shazam", heavyRouteConfig, async (req, reply) => {
       wavFilepath,
       isLastFmConfigured,
       scrobbleTrack,
+      musicBrainzUserAgent: MUSICBRAINZ_USER_AGENT,
       logger: fastify.log,
     });
 
@@ -491,6 +497,7 @@ fastify.post("/api/identify-enhanced", heavyRouteConfig, async (req, reply) => {
       wavFilepath,
       isLastFmConfigured,
       scrobbleTrack,
+      musicBrainzUserAgent: MUSICBRAINZ_USER_AGENT,
       logger: fastify.log,
     });
 
