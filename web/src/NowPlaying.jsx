@@ -85,6 +85,17 @@ const adjustColor = (hex, saturationFactor = 0.7, lightnessFactor = 0.7) => {
   return `#${toHex(rNew)}${toHex(gNew)}${toHex(bNew)}`;
 };
 
+const withAlpha = (hex, alpha) => {
+  if (!/^#([A-Fa-f0-9]{6})$/.test(hex || '')) {
+    return `rgba(255,255,255,${alpha})`;
+  }
+
+  const r = parseInt(hex.slice(1, 3), 16);
+  const g = parseInt(hex.slice(3, 5), 16);
+  const b = parseInt(hex.slice(5, 7), 16);
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+};
+
 const NowPlaying = ({ 
   artistName, 
   trackTitle, 
@@ -130,20 +141,20 @@ const NowPlaying = ({
 
   // Create deeper, moodier colors for dark mode effect
   const createDarkModeColors = (extractedColors) => {
-    // Use extracted colors but adjust them for a darker, more dramatic effect
-    const bg1 = extractedColors.darkVibrant || extractedColors.vibrant || '#0a0a1e';
-    const bg2 = extractedColors.dominant || extractedColors.muted || '#0b1020';
-    const bg3 = extractedColors.muted || extractedColors.lightMuted || '#0c1525';
-    
-    // Apply stronger darkening and desaturation for moodier effect
-    const adjustedBg1 = adjustColor(bg1, 0.7, 0.6); // More desaturation, darker
-    const adjustedBg2 = adjustColor(bg2, 0.6, 0.5); // Even more desaturation, darker
-    const adjustedBg3 = adjustColor(bg3, 0.6, 0.4); // Most desaturation, darkest
-    
+    const bg1 = extractedColors.darkVibrant || extractedColors.dominant || '#0a0a1e';
+    const bg2 = extractedColors.vibrant || extractedColors.muted || '#0b1020';
+    const bg3 = extractedColors.muted || extractedColors.lightVibrant || '#0c1525';
+
+    const adjustedBg1 = adjustColor(bg1, 0.95, 0.62);
+    const adjustedBg2 = adjustColor(bg2, 1.1, 0.68);
+    const adjustedBg3 = adjustColor(bg3, 0.78, 0.45);
+
     return {
       bg1: adjustedBg1,
       bg2: adjustedBg2,
       bg3: adjustedBg3,
+      glow1: adjustColor(extractedColors.vibrant || adjustedBg2, 1.15, 0.88),
+      glow2: adjustColor(extractedColors.lightVibrant || extractedColors.dominant || adjustedBg1, 1.05, 0.78),
       text: '#fff'
     };
   };
@@ -170,7 +181,12 @@ const NowPlaying = ({
 
   const textColor = calculateTextColor();
   const textShadow = calculateTextShadow();
-  const backgroundGradient = `linear-gradient(135deg, ${colors.bg1}, ${colors.bg2}, ${colors.bg3})`;
+  const backgroundGradient = `
+    radial-gradient(circle at 18% 18%, ${withAlpha(colors.glow1 || colors.bg2, 0.33)}, transparent 28%),
+    radial-gradient(circle at 82% 24%, ${withAlpha(colors.glow2 || colors.bg1, 0.22)}, transparent 34%),
+    radial-gradient(circle at 50% 85%, ${withAlpha(colors.bg2, 0.24)}, transparent 38%),
+    linear-gradient(140deg, ${colors.bg1}, ${colors.bg2} 54%, ${colors.bg3})
+  `;
 
   return (
     <div className="now-playing-wrapper" style={{
@@ -182,6 +198,14 @@ const NowPlaying = ({
       alignItems: 'center',
       justifyContent: 'center'
     }}>
+      <div
+        aria-hidden
+        className="ambient-art"
+        style={{
+          backgroundImage: albumArtUrl ? `url(${albumArtUrl})` : 'none',
+        }}
+      />
+      <div className="ambient-film" />
       <div className="content" style={{
         width: 'min(1200px, 95vw)'
       }}>
@@ -197,7 +221,7 @@ const NowPlaying = ({
             maxWidth: '420px',
             borderRadius: '16px',
             overflow: 'hidden',
-            boxShadow: '0 8px 40px rgba(0, 0, 0, 0.3), 0 0 80px rgba(255, 255, 255, 0.1)'
+            boxShadow: `0 24px 80px ${withAlpha(colors.bg1, 0.58)}, 0 0 120px ${withAlpha(colors.glow1 || colors.bg2, 0.16)}`
           }}>
             {albumArtUrl ? (
               <img 
@@ -230,7 +254,9 @@ const NowPlaying = ({
             flex: '1 1 300px',
             padding: 'clamp(20px, 3vw, 32px)',
             borderRadius: '20px',
-            background: 'transparent',
+            background: 'linear-gradient(180deg, rgba(255,255,255,0.06), rgba(255,255,255,0.02))',
+            backdropFilter: 'blur(12px)',
+            border: '1px solid rgba(255,255,255,0.08)',
             maxWidth: '600px'
           }}>
             {/* Artist name */}
