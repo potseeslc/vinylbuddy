@@ -12,7 +12,8 @@ Example response:
 {
   "ok": true,
   "service": "vinylbuddy",
-  "now_playing_reset_after_ms": 900000
+  "now_playing_reset_after_ms": 900000,
+  "auth_required_for_writes": false
 }
 ```
 
@@ -78,8 +79,26 @@ Example response:
 }
 ```
 
+## Authentication
+
+If `VINYLBUDDY_SHARED_TOKEN` is configured, write and recognition endpoints require one of these headers:
+
+```http
+Authorization: Bearer your-token
+```
+
+or
+
+```http
+X-VinylBuddy-Token: your-token
+```
+
+Read-only endpoints such as `GET /api/health` and `GET /api/now_playing` remain available without authentication so dashboards and Home Assistant can poll them.
+
 ## Environment Variables
 
 - `PORT`: HTTP port for the API server. Defaults to `3000`.
 - `MAX_UPLOAD_MB`: Maximum upload size for recognition endpoints. Defaults to `25`.
 - `NOW_PLAYING_RESET_AFTER_MS`: How long now-playing data remains in the `playing` state before resetting to `idle`. Defaults to `900000`.
+- `UPLOADS_DIR`: Temporary upload and processing directory. Defaults to `api/src/uploads` in local runs and can be set to `/app/uploads` in containers.
+- `VINYLBUDDY_SHARED_TOKEN`: Optional shared token for write and recognition endpoints.

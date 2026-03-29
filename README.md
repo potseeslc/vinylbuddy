@@ -1,17 +1,17 @@
 # Vinyl Buddy
 
-Vinyl Buddy is a self-hosted web application that helps you identify vinyl records by continuously listening to music playing on your turntable and automatically matching it against music databases.
+Vinyl Buddy is a self-hosted now-playing service for vinyl playback. A dedicated listener such as `vinylbuddy-listener` captures audio, the Vinyl Buddy server identifies the track, and the web app and Home Assistant display the result.
 
 ## Features
 
+- **Headless Listener Support**: Works cleanly with dedicated listener hardware such as a Raspberry Pi
 - **Continuous Audio Recognition**: Automatically identifies tracks as they play on your turntable
 - **Shazam Integration**: Uses Shazam for accurate music recognition
 - **Cover Art Display**: Shows album artwork when available
 - **Last.fm Scrobbling**: Automatically scrobble identified tracks to your Last.fm account (optional)
 - **Self-Hosted**: Run the application on your own hardware for complete privacy
 - **Docker Support**: Easy deployment using Docker containers
-- **Simplified Interface**: Clean, minimal interface focused on continuous music detection
-- **Privacy Protection**: Automatically returns to initial screen after 5 minutes of inactivity
+- **Kiosk Display Mode**: Clean, minimal display for album art and now-playing details
 
 ## Prerequisites
 
@@ -32,19 +32,20 @@ cp .env.example .env
 ```
 
 3. Edit `.env` and set at least `MUSICBRAINZ_CONTACT`.
+4. Optional: set `VINYLBUDDY_SHARED_TOKEN` if you want to protect write and recognition endpoints.
 
-4. Start the service:
+5. Start the service:
 ```bash
 docker-compose up -d
 ```
 
-5. Access the application in your browser at http://localhost:3000
+6. Access the display UI in your browser at http://localhost:3000
 
 ## Usage
 
 1. Run a listener device such as [vinylbuddy-listener](https://github.com/potseeslc/vinylbuddy-listener) on your audio source
 2. Open the Vinyl Buddy web interface in your browser at http://localhost:3000
-3. The web app will poll the now-playing API and display the latest recognized track
+3. The web app runs in kiosk mode and polls the now-playing API for the latest recognized track
 4. View the identified album information and cover art as each track plays
 5. Home Assistant can consume the same now-playing data through the separate integration repo
 
@@ -81,6 +82,13 @@ The now-playing payload is intentionally stable and includes:
 - `updated_at`
 
 Detailed examples and response shapes are documented in [API.md](/Users/colterwilson/Documents/vinylbuddy/API.md).
+
+If `VINYLBUDDY_SHARED_TOKEN` is set, write and recognition endpoints require either:
+
+- `Authorization: Bearer <token>`
+- `X-VinylBuddy-Token: <token>`
+
+Read-only endpoints such as `GET /api/health` and `GET /api/now_playing` stay open for dashboards and Home Assistant.
 
 ## Home Assistant
 
