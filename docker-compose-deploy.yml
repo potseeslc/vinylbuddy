@@ -10,6 +10,8 @@ services:
     environment:
       - MUSICBRAINZ_CONTACT=your-email@example.com
       # - ACOUSTID_API_KEY=your-acoustid-api-key  # Uncomment and set if you have an API key
+      - UPLOADS_DIR=/app/uploads
+      # - VINYLBUDDY_SHARED_TOKEN=replace-me
       - NODE_ENV=production
     restart: unless-stopped
 

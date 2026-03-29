@@ -16,8 +16,7 @@ Vinyl Buddy is a self-hosted web application that helps you identify vinyl recor
 ## Prerequisites
 
 - Docker and Docker Compose installed on your system
-- Microphone access (built-in or external)
-- **Important**: The application must be accessed via `localhost` or HTTPS to enable microphone access due to browser security restrictions
+- A listener source for audio capture, such as `vinylbuddy-listener` on a Raspberry Pi
 
 ## Quick Start with Docker Compose
 
@@ -43,20 +42,15 @@ docker-compose up -d
 
 ## Usage
 
-1. Open the Vinyl Buddy web interface in your browser at http://localhost:3000
-2. Click the record player icon to start continuous listening mode
-3. The application will automatically request microphone access
-4. Start playing music on your turntable
-5. Vinyl Buddy will automatically detect and display track information
-6. View the identified album information and cover art as each track plays
-7. For privacy protection, the app will automatically return to the initial screen after 5 minutes of inactivity (no music detected)
-8. To resume listening, simply click the record player icon again
-
-**Note**: Due to browser security restrictions, the application must be accessed via `localhost` or HTTPS to enable microphone access. If accessing remotely, you'll need to set up HTTPS with a valid certificate.
+1. Run a listener device such as [vinylbuddy-listener](https://github.com/potseeslc/vinylbuddy-listener) on your audio source
+2. Open the Vinyl Buddy web interface in your browser at http://localhost:3000
+3. The web app will poll the now-playing API and display the latest recognized track
+4. View the identified album information and cover art as each track plays
+5. Home Assistant can consume the same now-playing data through the separate integration repo
 
 ## Technical Details
 
-- **Frontend**: React-based web interface with continuous listening mode
+- **Frontend**: React-based kiosk-style now-playing display
 - **Backend**: Node.js with Fastify framework
 - **Audio Processing**: FFmpeg for audio conversion
 - **Recognition Services**: 

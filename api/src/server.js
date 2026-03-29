@@ -28,6 +28,7 @@ const uploadsDir = path.join(__dirname, 'uploads');
 const helperScript = path.join(__dirname, 'fpcalc-helper.sh');
 const ACOUSTID_API_KEY = process.env.ACOUSTID_API_KEY || "";
 const MUSICBRAINZ_CONTACT = process.env.MUSICBRAINZ_CONTACT || "";
+const SHARED_TOKEN = process.env.VINYLBUDDY_SHARED_TOKEN || "";
 const MUSICBRAINZ_USER_AGENT = MUSICBRAINZ_CONTACT
   ? `VinylBuddy/1.0 (${MUSICBRAINZ_CONTACT})`
   : "VinylBuddy/1.0 (https://github.com/potseeslc/vinylbuddy)";
@@ -48,6 +49,7 @@ const MIME_TYPE_TO_EXTENSION = {
 };
 const NOW_PLAYING_RESET_AFTER_MS = Number(process.env.NOW_PLAYING_RESET_AFTER_MS || "900000");
 const PORT = Number(process.env.PORT || "3000");
+const resolvedUploadsDir = process.env.UPLOADS_DIR || uploadsDir;
 const nowPlayingState = {
   state: "idle",
   title: null,
@@ -73,8 +75,8 @@ function resetNowPlaying(updatedAt = null) {
 }
 
 // Ensure uploads directory exists
-if (!fs.existsSync(uploadsDir)) {
-  fs.mkdirSync(uploadsDir, { recursive: true });
+if (!fs.existsSync(resolvedUploadsDir)) {
+  fs.mkdirSync(resolvedUploadsDir, { recursive: true });
 }
 
 function sanitizeExtension(filename, mimetype) {
@@ -95,7 +97,7 @@ async function persistUpload(part) {
   const fileId = uuidv4();
   const ext = sanitizeExtension(part.filename, part.mimetype);
   const filename = `${fileId}.${ext}`;
-  const filepath = path.join(uploadsDir, filename);
+  const filepath = path.join(resolvedUploadsDir, filename);
 
   const fileStream = fs.createWriteStream(filepath);
   await promisify(streamPipeline)(part.file, fileStream);
@@ -143,7 +145,7 @@ async function ensureWavFile(inputPath, fileId) {
     };
   }
 
-  const wavFilepath = path.join(uploadsDir, `${fileId}.wav`);
+  const wavFilepath = path.join(resolvedUploadsDir, `${fileId}.wav`);
   await convertToWav(inputPath, wavFilepath);
   return {
     wavFilepath,
@@ -153,6 +155,31 @@ async function ensureWavFile(inputPath, fileId) {
 
 async function generateFingerprint(wavPath, fingerprintPath) {
   await execFilePromise("sh", [helperScript, wavPath, fingerprintPath]);
+}
+
+function isAuthorized(req) {
+  if (!SHARED_TOKEN) {
+    return true;
+  }
+
+  const bearerToken = req.headers.authorization?.startsWith("Bearer ")
+    ? req.headers.authorization.slice(7)
+    : null;
+  const headerToken = req.headers["x-vinylbuddy-token"];
+  return bearerToken === SHARED_TOKEN || headerToken === SHARED_TOKEN;
+}
+
+function requireSharedToken(req, reply) {
+  if (isAuthorized(req)) {
+    return true;
+  }
+
+  reply.code(401).send({
+    success: false,
+    error: "Unauthorized",
+    message: "A valid Vinyl Buddy shared token is required for this endpoint.",
+  });
+  return false;
 }
 
 function updateNowPlaying(result) {
@@ -234,11 +261,13 @@ fastify.get("/api/health", async () => ({
   ok: true,
   service: "vinylbuddy",
   now_playing_reset_after_ms: NOW_PLAYING_RESET_AFTER_MS,
+  auth_required_for_writes: Boolean(SHARED_TOKEN),
 }));
 
 fastify.get("/api/now_playing", async () => getNowPlayingState());
 
-fastify.post("/api/clear_now_playing", async () => {
+fastify.post("/api/clear_now_playing", async (req, reply) => {
+  if (!requireSharedToken(req, reply)) return;
   resetNowPlaying(new Date().toISOString());
   return getNowPlayingState();
 });
@@ -246,6 +275,7 @@ fastify.post("/api/clear_now_playing", async () => {
 // Upload endpoint: expects multipart/form-data field name "audio"
 fastify.post("/api/identify", heavyRouteConfig, async (req, reply) => {
   try {
+    if (!requireSharedToken(req, reply)) return;
     const part = await req.file();
     if (!part) return reply.code(400).send({ error: "Missing file field 'audio'" });
 
@@ -257,7 +287,7 @@ fastify.post("/api/identify", heavyRouteConfig, async (req, reply) => {
     
     fastify.log.info(`Converted to WAV: ${wavFilepath}`);
 
-    const fingerprintFile = path.join(uploadsDir, `${fileId}.fingerprint`);
+    const fingerprintFile = path.join(resolvedUploadsDir, `${fileId}.fingerprint`);
     await generateFingerprint(wavFilepath, fingerprintFile);
     
     fastify.log.info(`Generated fingerprint: ${fingerprintFile}`);
@@ -301,6 +331,7 @@ fastify.post("/api/identify", heavyRouteConfig, async (req, reply) => {
 // New endpoint for metadata-based recognition
 fastify.post("/api/identify-metadata", async (req, reply) => {
   try {
+    if (!requireSharedToken(req, reply)) return;
     const { artist, album, track } = req.body;
     if (!artist && !album && !track) {
       return reply.code(400).send({
@@ -335,6 +366,7 @@ fastify.post("/api/identify-metadata", async (req, reply) => {
 // Enhanced identification endpoint that tries both methods
 fastify.post("/api/identify-hybrid", heavyRouteConfig, async (req, reply) => {
   try {
+    if (!requireSharedToken(req, reply)) return;
     let audioResult = null;
     let audioError = null;
     const part = await req.file();
@@ -342,7 +374,7 @@ fastify.post("/api/identify-hybrid", heavyRouteConfig, async (req, reply) => {
       try {
         const { fileId, filepath } = await persistUpload(part);
         const { wavFilepath, cleanupPaths } = await ensureWavFile(filepath, fileId);
-        const fingerprintFile = path.join(uploadsDir, `${fileId}.fingerprint`);
+        const fingerprintFile = path.join(resolvedUploadsDir, `${fileId}.fingerprint`);
 
         await generateFingerprint(wavFilepath, fingerprintFile);
 
@@ -419,6 +451,7 @@ fastify.post("/api/identify-hybrid", heavyRouteConfig, async (req, reply) => {
 
 // Fallback route for debugging
 fastify.post("/api/debug-upload", heavyRouteConfig, async (req, reply) => {
+  if (!requireSharedToken(req, reply)) return;
   const part = await req.file();
   if (!part) return reply.code(400).send({ error: "Missing file field 'audio'" });
 
@@ -440,6 +473,7 @@ fastify.post("/api/identify-shazam", heavyRouteConfig, async (req, reply) => {
   fastify.log.info("Shazam identification endpoint called");
   
   try {
+    if (!requireSharedToken(req, reply)) return;
     const part = await req.file();
     if (!part) return reply.code(400).send({ error: "Missing file field 'audio'" });
 
@@ -482,6 +516,7 @@ fastify.post("/api/identify-shazam", heavyRouteConfig, async (req, reply) => {
 // Enhanced endpoint that uses ONLY Shazam for recognition
 fastify.post("/api/identify-enhanced", heavyRouteConfig, async (req, reply) => {
   try {
+    if (!requireSharedToken(req, reply)) return;
     const part = await req.file();
     if (!part) return reply.code(400).send({ error: "Missing file field 'audio'" });
 
