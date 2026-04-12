@@ -102,7 +102,8 @@ const NowPlaying = ({
   albumTitle, 
   albumYear, 
   albumArtUrl,
-  method
+  method,
+  recordContext,
 }) => {
   const [colors, setColors] = useState({
     bg1: '#0a0a1e',
@@ -181,6 +182,12 @@ const NowPlaying = ({
 
   const textColor = calculateTextColor();
   const textShadow = calculateTextShadow();
+  const recordState = recordContext?.display_state || null;
+  const recordConfidence = Number.isFinite(Number(recordContext?.confidence))
+    ? Math.round(Number(recordContext.confidence))
+    : null;
+  const expectedNextTrack = recordContext?.expected_next_track || null;
+  const recordLabel = recordState === 'confirmed' ? 'Confirmed record' : 'Likely record';
   const backgroundGradient = `
     radial-gradient(circle at 18% 18%, ${withAlpha(colors.glow1 || colors.bg2, 0.33)}, transparent 28%),
     radial-gradient(circle at 82% 24%, ${withAlpha(colors.glow2 || colors.bg1, 0.22)}, transparent 34%),
@@ -245,6 +252,35 @@ const NowPlaying = ({
           </div>
 
           <div className="track-metadata">
+            {recordState && (
+              <div className={`record-context-card ${recordState}`}>
+                <div className="record-context-header">
+                  <span className={`record-context-pill ${recordState}`}>
+                    {recordLabel}
+                  </span>
+                  {recordConfidence !== null && (
+                    <span className="record-context-confidence">
+                      {recordConfidence}% confidence
+                    </span>
+                  )}
+                </div>
+                {recordContext?.release_title && (
+                  <div className="record-context-release">
+                    {recordContext.release_title}
+                  </div>
+                )}
+                {expectedNextTrack?.title && (
+                  <div className="record-context-next">
+                    <span className="record-context-next-label">Expected next</span>
+                    <span className="record-context-next-track">
+                      {expectedNextTrack.number ? `${expectedNextTrack.number}. ` : ''}
+                      {expectedNextTrack.title}
+                    </span>
+                  </div>
+                )}
+              </div>
+            )}
+
             {/* Artist name */}
             <div className="artist" style={{
               fontSize: 'clamp(20px, 2.5vw, 28px)',

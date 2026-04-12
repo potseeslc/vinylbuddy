@@ -1,1 +1,1 @@
-{"name":"vinyl-now-playing-api","private":true,"type":"module","dependencies":{"@fastify/multipart":"^9.4.0","@fastify/rate-limit":"^10.3.0","@fastify/static":"^9.0.0","axios":"^1.13.6","fastify":"^5.8.2","node-shazam":"^1.2.7","uuid":"^9.0.0"}}
+{"name":"vinyl-now-playing-api","private":true,"type":"module","scripts":{"simulate-record-context":"node src/record-context-simulator.js"},"dependencies":{"@fastify/multipart":"^9.4.0","@fastify/rate-limit":"^10.3.0","@fastify/static":"^9.0.0","axios":"^1.13.6","fastify":"^5.8.2","node-shazam":"^1.2.7","uuid":"^9.0.0"}}

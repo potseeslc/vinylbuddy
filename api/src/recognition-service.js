@@ -23,6 +23,27 @@ function normalizeDurationSeconds(value) {
   return Math.round(numericValue);
 }
 
+function normalizeText(value) {
+  if (typeof value !== "string") {
+    return "";
+  }
+
+  return value.toLowerCase().replace(/\s+/g, " ").trim();
+}
+
+function titlesRoughlyMatch(left, right) {
+  const normalizedLeft = normalizeText(left);
+  const normalizedRight = normalizeText(right);
+
+  return Boolean(normalizedLeft)
+    && Boolean(normalizedRight)
+    && (
+      normalizedLeft === normalizedRight
+      || normalizedLeft.includes(normalizedRight)
+      || normalizedRight.includes(normalizedLeft)
+    );
+}
+
 export function parseFingerprintData(fingerprintData) {
   let fingerprint = "";
   let duration = 0;
@@ -76,6 +97,9 @@ function toReleaseResult(releaseDetails) {
     title: releaseDetails.title,
     date: releaseDetails.date,
     country: releaseDetails.country,
+    release_group_id: releaseDetails["release-group"]?.id || null,
+    release_type: releaseDetails["release-group"]?.["primary-type"]?.toLowerCase() || null,
+    secondary_types: releaseDetails["release-group"]?.["secondary-types"] || [],
     tracklist: releaseDetails.media?.[0]?.tracks?.map((track) => ({
       number: track.number,
       title: track.title,
@@ -83,6 +107,89 @@ function toReleaseResult(releaseDetails) {
     })) || [],
     artist: releaseDetails["artist-credit"]?.map((credit) => credit.name).join(", ") || "Unknown Artist",
   };
+}
+
+function findTrackOnRelease(releaseDetails, trackTitle) {
+  for (const medium of releaseDetails.media || []) {
+    for (const track of medium.tracks || []) {
+      if (titlesRoughlyMatch(track.title, trackTitle) || titlesRoughlyMatch(track.recording?.title, trackTitle)) {
+        return {
+          track,
+          medium,
+        };
+      }
+    }
+  }
+
+  return null;
+}
+
+function toReleaseCandidate(releaseDetails, recording, { candidateScore = null } = {}) {
+  const matchedTrack = findTrackOnRelease(releaseDetails, recording?.title);
+
+  return {
+    release_id: releaseDetails.id,
+    release_group_id: releaseDetails["release-group"]?.id || null,
+    title: releaseDetails.title,
+    artist: releaseDetails["artist-credit"]?.map((credit) => credit.name).join(", ") || "Unknown Artist",
+    date: releaseDetails.date || null,
+    release_type: releaseDetails["release-group"]?.["primary-type"]?.toLowerCase() || null,
+    secondary_types: releaseDetails["release-group"]?.["secondary-types"] || [],
+    track_number: matchedTrack?.track?.number ? Number(matchedTrack.track.number) : null,
+    track_total: matchedTrack?.medium?.tracks?.length || releaseDetails.media?.[0]?.tracks?.length || null,
+    tracklist: releaseDetails.media?.[0]?.tracks?.map((track) => ({
+      number: track.number,
+      title: track.title,
+      duration: track.length,
+    })) || [],
+    sequence_capable: Boolean(matchedTrack?.track?.number),
+    candidate_score: candidateScore,
+  };
+}
+
+async function fetchReleaseCandidates(releases, recording, musicBrainzUserAgent, logger, maxCandidates = 3) {
+  if (!Array.isArray(releases) || !releases.length) {
+    return [];
+  }
+
+  const sortedReleases = [...releases]
+    .sort((left, right) => {
+      const leftDate = left.date || "";
+      const rightDate = right.date || "";
+      return rightDate.localeCompare(leftDate);
+    })
+    .slice(0, maxCandidates);
+
+  const candidates = [];
+
+  for (const release of sortedReleases) {
+    try {
+      const releaseDetails = await fetchReleaseDetails(release.id, musicBrainzUserAgent);
+      candidates.push(toReleaseCandidate(releaseDetails, recording));
+    } catch (error) {
+      logger.warn(`Could not fetch release candidate ${release.id}: ${error.message}`);
+    }
+  }
+
+  return candidates;
+}
+
+function computeResultConfidence(method, releaseCandidates = []) {
+  const candidateCount = releaseCandidates.length;
+
+  if (method === "fingerprint") {
+    return candidateCount ? 90 : 75;
+  }
+
+  if (method === "shazam") {
+    return candidateCount ? 85 : 70;
+  }
+
+  if (method === "metadata") {
+    return candidateCount ? 75 : 60;
+  }
+
+  return 60;
 }
 
 async function searchMusicBrainzRecording({ artist, album, track, musicBrainzUserAgent }) {
@@ -119,9 +226,12 @@ async function searchMusicBrainzRecording({ artist, album, track, musicBrainzUse
 }
 
 async function enrichShazamResultWithMusicBrainz(result, musicBrainzUserAgent, logger) {
-  const needsDate = !result.release?.date;
-  const needsDuration = !normalizeDurationSeconds(result.recording?.duration);
-  if (!needsDate && !needsDuration) {
+  const needsEnrichment = !result.release?.date
+    || !normalizeDurationSeconds(result.recording?.duration)
+    || !Array.isArray(result.release_candidates)
+    || !result.release_candidates.length;
+
+  if (!needsEnrichment) {
     return result;
   }
 
@@ -138,6 +248,16 @@ async function enrichShazamResultWithMusicBrainz(result, musicBrainzUserAgent, l
     }
 
     const releaseCandidate = musicBrainzRecording.releases?.find((release) => release.date) || musicBrainzRecording.releases?.[0];
+    const releaseCandidates = await fetchReleaseCandidates(
+      musicBrainzRecording.releases || [],
+      {
+        ...result.recording,
+        title: result.recording?.title || musicBrainzRecording.title,
+      },
+      musicBrainzUserAgent,
+      logger,
+    );
+    const winningCandidate = releaseCandidates[0] || null;
 
     return {
       ...result,
@@ -147,13 +267,21 @@ async function enrichShazamResultWithMusicBrainz(result, musicBrainzUserAgent, l
       },
       release: {
         ...result.release,
-        title: result.release?.title || releaseCandidate?.title || null,
-        date: result.release?.date || releaseCandidate?.date || null,
+        id: winningCandidate?.release_id || result.release?.id || null,
+        release_group_id: winningCandidate?.release_group_id || result.release?.release_group_id || null,
+        title: result.release?.title || winningCandidate?.title || releaseCandidate?.title || null,
+        date: result.release?.date || winningCandidate?.date || releaseCandidate?.date || null,
         artist:
           result.release?.artist ||
           musicBrainzRecording["artist-credit"]?.map((credit) => credit.name).join(", ") ||
           null,
+        release_type: winningCandidate?.release_type || result.release?.release_type || null,
+        secondary_types: winningCandidate?.secondary_types || result.release?.secondary_types || [],
+        track_number: winningCandidate?.track_number || result.release?.track_number || null,
+        tracklist: winningCandidate?.tracklist || result.release?.tracklist || [],
       },
+      release_candidates: releaseCandidates,
+      confidence: computeResultConfidence(result.method, releaseCandidates),
       coverArtUrl: result.coverArtUrl || null,
     };
   } catch (error) {
@@ -238,6 +366,12 @@ export async function identifyByFingerprint({
 
     try {
       const releaseDetails = await fetchReleaseDetails(bestRelease.id, musicBrainzUserAgent);
+      const releaseCandidates = await fetchReleaseCandidates(
+        bestRecording.releases || [],
+        bestRecording,
+        musicBrainzUserAgent,
+        logger,
+      );
       const coverArtUrl = await fetchCoverArt(bestRelease.id, logger);
 
       return {
@@ -246,10 +380,13 @@ export async function identifyByFingerprint({
         recording: {
           id: bestRecording.id,
           title: bestRecording.title,
+          artist: bestRecording.artists?.map((artist) => artist.name).join(", ") || "Unknown Artist",
           duration: normalizeDurationSeconds(bestRecording.duration),
           artists: bestRecording.artists,
         },
         release: toReleaseResult(releaseDetails),
+        release_candidates: releaseCandidates,
+        confidence: computeResultConfidence("fingerprint", releaseCandidates),
         coverArtUrl,
         fingerprintGenerated: true,
         durationMeasured: duration,
@@ -401,6 +538,7 @@ export async function identifyByMetadata({
     }
 
     let releaseInfo = null;
+    let releaseCandidates = [];
     let coverArtUrl = null;
 
     let sortedReleases = [];
@@ -417,6 +555,12 @@ export async function identifyByMetadata({
     if (sortedReleases.length) {
       try {
         releaseInfo = await fetchReleaseDetails(sortedReleases[0].id, musicBrainzUserAgent);
+        releaseCandidates = await fetchReleaseCandidates(
+          sortedReleases,
+          bestResult,
+          musicBrainzUserAgent,
+          logger,
+        );
       } catch (error) {
         logger.warn(`Could not fetch release info: ${error.message}`);
       }
@@ -438,9 +582,18 @@ export async function identifyByMetadata({
             id: releaseInfo.id,
             title: releaseInfo.title,
             date: releaseInfo.date,
+            release_group_id: releaseInfo["release-group"]?.id || null,
+            release_type: releaseInfo["release-group"]?.["primary-type"]?.toLowerCase() || null,
+            secondary_types: releaseInfo["release-group"]?.["secondary-types"] || [],
+            track_number: findTrackOnRelease(releaseInfo, bestResult.title)?.track?.number
+              ? Number(findTrackOnRelease(releaseInfo, bestResult.title).track.number)
+              : null,
+            tracklist: toReleaseResult(releaseInfo).tracklist,
             artist: releaseInfo["artist-credit"]?.map((credit) => credit.name).join(", ") || "Unknown Artist",
           }
         : null,
+      release_candidates: releaseCandidates,
+      confidence: computeResultConfidence("metadata", releaseCandidates),
       coverArtUrl,
     };
   } catch (error) {
@@ -488,10 +641,18 @@ export async function identifyByShazam({
         duration: normalizeDurationSeconds(trackInfo.duration),
       },
       release: {
+        id: null,
+        release_group_id: null,
         title: albumTitle,
         date: trackInfo.release_date || null,
         artist: trackInfo.subtitle || "Unknown Artist",
+        release_type: null,
+        secondary_types: [],
+        track_number: null,
+        tracklist: [],
       },
+      release_candidates: [],
+      confidence: computeResultConfidence("shazam", []),
       coverArtUrl: trackInfo.images?.coverart || null,
       shazamData: shazamResult,
     };

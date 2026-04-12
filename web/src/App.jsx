@@ -88,6 +88,7 @@ export default function App() {
         albumYear={nowPlaying.album_year}
         albumArtUrl={nowPlaying.image_url}
         method={nowPlaying.source}
+        recordContext={nowPlaying.record_context}
       />
       <div className={statusTone}>{status}</div>
     </main>

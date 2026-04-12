@@ -33,7 +33,18 @@ Example `playing` response:
   "duration": 545,
   "image_url": "https://coverartarchive.org/release/.../front",
   "source": "shazam",
-  "updated_at": "2026-03-22T18:00:00Z"
+  "updated_at": "2026-03-22T18:00:00Z",
+  "record_context": {
+    "state": "confirmed",
+    "display_state": "confirmed",
+    "confidence": 96,
+    "release_group_title": "Kind of Blue",
+    "release_title": "Kind of Blue",
+    "expected_next_track": {
+      "number": 2,
+      "title": "Freddie Freeloader"
+    }
+  }
 }
 ```
 
@@ -49,7 +60,15 @@ Example `idle` response:
   "duration": null,
   "image_url": null,
   "source": null,
-  "updated_at": "2026-03-22T18:10:00Z"
+  "updated_at": "2026-03-22T18:10:00Z",
+  "record_context": {
+    "state": "unlocked",
+    "display_state": null,
+    "confidence": 0,
+    "release_group_title": null,
+    "release_title": null,
+    "expected_next_track": null
+  }
 }
 ```
 
@@ -58,6 +77,10 @@ Notes:
 - `state` is `playing` after a successful identification and falls back to `idle` after `NOW_PLAYING_RESET_AFTER_MS`.
 - `updated_at` is the timestamp of the last state change.
 - `duration` is returned in whole seconds when known.
+- `record_context` is additive and is safe for existing consumers to ignore.
+- `record_context.state` uses `unlocked`, `candidate`, and `confirmed`.
+- `record_context.display_state` is intended for the UI and currently returns `likely` or `confirmed` when a record candidate exists.
+- `record_context.expected_next_track` is present when Vinyl Buddy has enough album-context data to anticipate what is likely next.
 
 ## `POST /api/clear_now_playing`
 
@@ -75,7 +98,15 @@ Example response:
   "duration": null,
   "image_url": null,
   "source": null,
-  "updated_at": "2026-03-22T18:15:00Z"
+  "updated_at": "2026-03-22T18:15:00Z",
+  "record_context": {
+    "state": "unlocked",
+    "display_state": null,
+    "confidence": 0,
+    "release_group_title": null,
+    "release_title": null,
+    "expected_next_track": null
+  }
 }
 ```
 

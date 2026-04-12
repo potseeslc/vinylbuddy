@@ -12,6 +12,13 @@ import { pipeline as streamPipeline } from 'stream';
 // Import Last.fm service
 import { scrobbleTrack, isLastFmConfigured } from './lastfm-service.js';
 import { identifyByFingerprint, identifyByMetadata, identifyByShazam } from "./recognition-service.js";
+import {
+  applyDetectionToRecordContext,
+  buildDetectionResult,
+  createEmptyRecordContext,
+  getPublicRecordContext,
+  resetRecordContext,
+} from "./record-context-service.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -61,6 +68,7 @@ const nowPlayingState = {
   source: null,
   updated_at: null,
 };
+const recordContextState = createEmptyRecordContext();
 
 function resetNowPlaying(updatedAt = null) {
   nowPlayingState.state = "idle";
@@ -72,6 +80,11 @@ function resetNowPlaying(updatedAt = null) {
   nowPlayingState.image_url = null;
   nowPlayingState.source = null;
   nowPlayingState.updated_at = updatedAt;
+}
+
+function resetPlaybackState(updatedAt = null) {
+  resetNowPlaying(updatedAt);
+  resetRecordContext(recordContextState);
 }
 
 // Ensure uploads directory exists
@@ -207,17 +220,32 @@ function updateNowPlaying(result) {
   nowPlayingState.updated_at = updatedAt;
 }
 
+function updateRecordContext(result) {
+  if (!result?.success) {
+    return;
+  }
+
+  const detection = buildDetectionResult(result);
+  applyDetectionToRecordContext(recordContextState, detection);
+}
+
 function getNowPlayingState() {
   if (!nowPlayingState.updated_at) {
-    return { ...nowPlayingState };
+    return {
+      ...nowPlayingState,
+      record_context: getPublicRecordContext(recordContextState),
+    };
   }
 
   const ageMs = Date.now() - Date.parse(nowPlayingState.updated_at);
   if (Number.isFinite(ageMs) && ageMs > NOW_PLAYING_RESET_AFTER_MS) {
-    resetNowPlaying(nowPlayingState.updated_at);
+    resetPlaybackState(nowPlayingState.updated_at);
   }
 
-  return { ...nowPlayingState };
+  return {
+    ...nowPlayingState,
+    record_context: getPublicRecordContext(recordContextState),
+  };
 }
 
 // Register JSON body parser
@@ -268,7 +296,7 @@ fastify.get("/api/now_playing", async () => getNowPlayingState());
 
 fastify.post("/api/clear_now_playing", async (req, reply) => {
   if (!requireSharedToken(req, reply)) return;
-  resetNowPlaying(new Date().toISOString());
+  resetPlaybackState(new Date().toISOString());
   return getNowPlayingState();
 });
 
@@ -310,6 +338,7 @@ fastify.post("/api/identify", heavyRouteConfig, async (req, reply) => {
     }
 
     updateNowPlaying(result);
+    updateRecordContext(result);
     return result;
   } catch (error) {
     fastify.log.error(`Server error: ${error.message}`);
@@ -352,6 +381,7 @@ fastify.post("/api/identify-metadata", async (req, reply) => {
     }
 
     updateNowPlaying(result);
+    updateRecordContext(result);
     return result;
   } catch (error) {
     fastify.log.error(`Server error: ${error.message}`);
@@ -404,6 +434,7 @@ fastify.post("/api/identify-hybrid", heavyRouteConfig, async (req, reply) => {
 
       if (metadataResult.success) {
         updateNowPlaying(metadataResult);
+        updateRecordContext(metadataResult);
         return {
           success: true,
           method: "hybrid",
@@ -416,6 +447,7 @@ fastify.post("/api/identify-hybrid", heavyRouteConfig, async (req, reply) => {
 
     if (audioResult && audioResult.success) {
       updateNowPlaying(audioResult);
+      updateRecordContext(audioResult);
       return audioResult;
     }
 
@@ -429,6 +461,7 @@ fastify.post("/api/identify-hybrid", heavyRouteConfig, async (req, reply) => {
       });
 
       updateNowPlaying(result);
+      updateRecordContext(result);
       return result;
     }
 
@@ -495,6 +528,7 @@ fastify.post("/api/identify-shazam", heavyRouteConfig, async (req, reply) => {
 
     await cleanupFiles([filepath, ...cleanupPaths]);
     updateNowPlaying(result);
+    updateRecordContext(result);
     return result;
   } catch (error) {
     fastify.log.error(`Server error: ${error.message}`);
@@ -538,6 +572,7 @@ fastify.post("/api/identify-enhanced", heavyRouteConfig, async (req, reply) => {
 
     await cleanupFiles([filepath, ...cleanupPaths]);
     updateNowPlaying(result);
+    updateRecordContext(result);
     return result;
     
   } catch (error) {

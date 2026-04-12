@@ -8,6 +8,8 @@ Vinyl Buddy is a self-hosted now-playing service for vinyl playback. A dedicated
 - **Continuous Audio Recognition**: Automatically identifies tracks as they play on your turntable
 - **Shazam Integration**: Uses Shazam for accurate music recognition
 - **Cover Art Display**: Shows album artwork when available
+- **Record Context Awareness**: Tracks likely vs confirmed album context across consecutive detections
+- **Expected Next Track**: Surfaces the next likely track once sequence is confirmed
 - **Last.fm Scrobbling**: Automatically scrobble identified tracks to your Last.fm account (optional)
 - **Self-Hosted**: Run the application on your own hardware for complete privacy
 - **Docker Support**: Easy deployment using Docker containers
@@ -46,7 +48,7 @@ docker-compose up -d
 1. Run a listener device such as [vinylbuddy-listener](https://github.com/potseeslc/vinylbuddy-listener) on your audio source
 2. Open the Vinyl Buddy web interface in your browser at http://localhost:3000
 3. The web app runs in kiosk mode and polls the now-playing API for the latest recognized track
-4. View the identified album information and cover art as each track plays
+4. View the identified album information, likely vs confirmed record context, and expected next track as each track plays
 5. Home Assistant can consume the same now-playing data through the separate integration repo
 
 ## Technical Details
@@ -80,6 +82,16 @@ The now-playing payload is intentionally stable and includes:
 - `image_url`
 - `source`
 - `updated_at`
+- `record_context`
+
+The `record_context` object adds lightweight album-session intelligence:
+
+- `state`: `unlocked`, `candidate`, or `confirmed`
+- `display_state`: UI-friendly state such as `likely` or `confirmed`
+- `confidence`: normalized confidence score
+- `release_group_title`
+- `release_title`
+- `expected_next_track`
 
 Detailed examples and response shapes are documented in [API.md](/Users/colterwilson/Documents/vinylbuddy/API.md).
 

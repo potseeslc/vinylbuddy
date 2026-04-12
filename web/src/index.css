@@ -143,6 +143,87 @@ button {
   text-align: left;
 }
 
+.record-context-card {
+  display: grid;
+  gap: 12px;
+  margin-bottom: 26px;
+  padding: 16px 18px;
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.18);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+}
+
+.record-context-card.confirmed {
+  background: rgba(18, 52, 34, 0.28);
+  border-color: rgba(155, 255, 204, 0.22);
+}
+
+.record-context-card.likely {
+  background: rgba(29, 39, 69, 0.3);
+  border-color: rgba(190, 214, 255, 0.16);
+}
+
+.record-context-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
+.record-context-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 8px 12px;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.record-context-pill.confirmed {
+  background: rgba(154, 255, 205, 0.16);
+  color: #dfffee;
+}
+
+.record-context-pill.likely {
+  background: rgba(205, 224, 255, 0.12);
+  color: #e6eeff;
+}
+
+.record-context-confidence {
+  font-size: 0.92rem;
+  color: rgba(255, 255, 255, 0.72);
+}
+
+.record-context-release {
+  font-size: clamp(18px, 2vw, 24px);
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.96);
+  line-height: 1.2;
+}
+
+.record-context-next {
+  display: grid;
+  gap: 4px;
+}
+
+.record-context-next-label {
+  font-size: 0.76rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.58);
+}
+
+.record-context-next-track {
+  font-size: clamp(16px, 1.8vw, 20px);
+  color: rgba(255, 255, 255, 0.92);
+}
+
 .idle-screen {
   min-height: 100%;
   display: flex;
@@ -221,8 +302,15 @@ button {
   .track-metadata .artist,
   .track-metadata .title,
   .track-metadata .album,
-  .track-metadata .source {
+  .track-metadata .source,
+  .record-context-card,
+  .record-context-header,
+  .record-context-next {
     text-align: center;
+  }
+
+  .record-context-header {
+    justify-content: center;
   }
 
   .album-art {
