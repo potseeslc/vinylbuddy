@@ -229,6 +229,33 @@ function updateRecordContext(result) {
   applyDetectionToRecordContext(recordContextState, detection);
 }
 
+function logRecognitionResult(result) {
+  if (!result) {
+    fastify.log.warn("Recognition returned no result payload");
+    return;
+  }
+
+  if (result.success) {
+    fastify.log.info({
+      method: result.method || null,
+      confidence: result.confidence ?? null,
+      title: result.recording?.title || null,
+      artist: result.recording?.artist || result.release?.artist || null,
+      album: result.release?.title || null,
+      albumYear: result.release?.date ? String(result.release.date).split("-")[0] : null,
+      candidateCount: Array.isArray(result.release_candidates) ? result.release_candidates.length : 0,
+    }, "Recognition succeeded");
+    return;
+  }
+
+  fastify.log.warn({
+    method: result.method || null,
+    error: result.error || null,
+    confidence: result.confidence ?? null,
+    candidateCount: Array.isArray(result.release_candidates) ? result.release_candidates.length : 0,
+  }, "Recognition failed");
+}
+
 function getNowPlayingState() {
   if (!nowPlayingState.updated_at) {
     return {
@@ -329,6 +356,7 @@ fastify.post("/api/identify", heavyRouteConfig, async (req, reply) => {
     await cleanupFiles([filepath, ...cleanupPaths, fingerprintFile]);
 
     if (!result.success) {
+      logRecognitionResult(result);
       return {
         ...result,
         received_bytes: stats.size,
@@ -337,6 +365,7 @@ fastify.post("/api/identify", heavyRouteConfig, async (req, reply) => {
       };
     }
 
+    logRecognitionResult(result);
     updateNowPlaying(result);
     updateRecordContext(result);
     return result;
@@ -377,9 +406,11 @@ fastify.post("/api/identify-metadata", async (req, reply) => {
     });
 
     if (!result.success && result.error.startsWith("MusicBrainz lookup failed:")) {
+      logRecognitionResult(result);
       return reply.code(500).send(result);
     }
 
+    logRecognitionResult(result);
     updateNowPlaying(result);
     updateRecordContext(result);
     return result;
@@ -433,6 +464,7 @@ fastify.post("/api/identify-hybrid", heavyRouteConfig, async (req, reply) => {
       });
 
       if (metadataResult.success) {
+        logRecognitionResult(metadataResult);
         updateNowPlaying(metadataResult);
         updateRecordContext(metadataResult);
         return {
@@ -446,6 +478,7 @@ fastify.post("/api/identify-hybrid", heavyRouteConfig, async (req, reply) => {
     }
 
     if (audioResult && audioResult.success) {
+      logRecognitionResult(audioResult);
       updateNowPlaying(audioResult);
       updateRecordContext(audioResult);
       return audioResult;
@@ -460,6 +493,7 @@ fastify.post("/api/identify-hybrid", heavyRouteConfig, async (req, reply) => {
         logger: fastify.log,
       });
 
+      logRecognitionResult(result);
       updateNowPlaying(result);
       updateRecordContext(result);
       return result;
@@ -527,6 +561,7 @@ fastify.post("/api/identify-shazam", heavyRouteConfig, async (req, reply) => {
     });
 
     await cleanupFiles([filepath, ...cleanupPaths]);
+    logRecognitionResult(result);
     updateNowPlaying(result);
     updateRecordContext(result);
     return result;
@@ -571,6 +606,7 @@ fastify.post("/api/identify-enhanced", heavyRouteConfig, async (req, reply) => {
     });
 
     await cleanupFiles([filepath, ...cleanupPaths]);
+    logRecognitionResult(result);
     updateNowPlaying(result);
     updateRecordContext(result);
     return result;
